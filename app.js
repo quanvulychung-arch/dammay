@@ -1,11 +1,11 @@
 /**
- * OneDrive CloudDrop Pro - Frontend Engine
- * Direct Upload & Zero-Login Integration via Cloudflare Worker Gateway
+ * CloudVault Pro - Frontend Engine
+ * Direct Zero-Login Upload Gateway & Enterprise Cloud Storage
  */
 
 const WORKER_URL = 'https://onedrive-upload.huannet2018.workers.dev';
 
-let oneDriveFiles = [];
+let cloudFiles = [];
 let currentCategory = 'all';
 let currentSearch = '';
 let isListView = false;
@@ -15,7 +15,7 @@ let qrCodeInstance = null;
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
     initUI();
-    checkHealthAndLoad();
+    loadCloudFiles();
 });
 
 function initUI() {
@@ -60,7 +60,7 @@ function initUI() {
     if (refreshBtn) {
         refreshBtn.addEventListener('click', () => {
             refreshBtn.querySelector('i').classList.add('fa-spin');
-            loadOneDriveFiles().finally(() => {
+            loadCloudFiles().finally(() => {
                 setTimeout(() => refreshBtn.querySelector('i').classList.remove('fa-spin'), 600);
             });
         });
@@ -141,29 +141,6 @@ function initUI() {
     }
 }
 
-// 0. Check Health & Connect
-async function checkHealthAndLoad() {
-    const badge = document.getElementById('cloud-status-badge');
-    const statusText = document.getElementById('status-text');
-
-    try {
-        const res = await fetch(`${WORKER_URL}/status`);
-        const data = await res.json();
-
-        if (data.success) {
-            statusText.innerText = data.user ? `OneDrive: ${data.user}` : 'OneDrive Cloud Online';
-            badge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm';
-        } else {
-            statusText.innerText = 'Cần kiểm tra Token';
-            badge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 shadow-sm';
-        }
-    } catch (e) {
-        if (statusText) statusText.innerText = 'Cloudflare Worker Online';
-    }
-
-    loadOneDriveFiles();
-}
-
 // 1. Upload Files
 async function handleUploadFiles(files) {
     const queue = document.getElementById('upload-queue');
@@ -178,7 +155,7 @@ async function handleUploadFiles(files) {
         itemEl.innerHTML = `
             <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-2.5 truncate max-w-[70%]">
-                    <div class="w-7 h-7 rounded-lg bg-sky-50 text-brand-500 flex items-center justify-center font-bold">
+                    <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
                         <i class="${getFileIcon(file.name)}"></i>
                     </div>
                     <div class="truncate">
@@ -187,11 +164,11 @@ async function handleUploadFiles(files) {
                     </div>
                 </div>
                 <div class="status-box flex items-center space-x-1.5">
-                    <span class="text-brand-500 font-semibold text-[11px]"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Đang tải lên...</span>
+                    <span class="text-blue-600 font-semibold text-[11px]"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Đang tải lên đám mây...</span>
                 </div>
             </div>
             <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                <div class="progress-bar bg-brand-500 h-full w-2/3 animate-pulse transition-all duration-300"></div>
+                <div class="progress-bar bg-blue-600 h-full w-2/3 animate-pulse transition-all duration-300"></div>
             </div>
         `;
         if (queueItems) queueItems.prepend(itemEl);
@@ -218,19 +195,19 @@ async function handleUploadFiles(files) {
                         </div>
                         <div class="truncate">
                             <p class="font-semibold text-slate-800 truncate">${escapeHtml(file.name)}</p>
-                            <p class="text-[10px] text-emerald-600 font-medium">Đã lưu vào OneDrive</p>
+                            <p class="text-[10px] text-emerald-600 font-medium">Đã lưu trữ an toàn</p>
                         </div>
                     </div>
                     <div class="flex items-center space-x-1.5">
-                        <button onclick="copyToClipboard('${resData.file.download_url}')" class="px-2.5 py-1 bg-white rounded-lg border border-emerald-200 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50">
+                        <button onclick="copyToClipboard('${resData.file.download_url}')" class="px-2.5 py-1 bg-white rounded-lg border border-emerald-200 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 transition">
                             <i class="fa-regular fa-copy mr-1"></i> Copy Link
                         </button>
                     </div>
                 `;
                 showToast(`✓ Đã tải lên "${file.name}" thành công!`, 'success');
-                loadOneDriveFiles();
+                loadCloudFiles();
             } else {
-                throw new Error(resData.message || 'Lỗi không xác định từ máy chủ');
+                throw new Error(resData.message || 'Lỗi kết nối máy chủ');
             }
         } catch (err) {
             itemEl.className = 'bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex items-center justify-between text-xs transition-all';
@@ -257,15 +234,15 @@ function updateQueueCount() {
     }
 }
 
-// 2. Fetch OneDrive Files
-async function loadOneDriveFiles() {
+// 2. Fetch Files
+async function loadCloudFiles() {
     try {
         const res = await fetch(`${WORKER_URL}/files`);
         if (!res.ok) throw new Error('Không thể tải danh sách tệp');
         const data = await res.json();
 
         if (data.success && Array.isArray(data.files)) {
-            oneDriveFiles = data.files;
+            cloudFiles = data.files;
             updateCategoryCounts();
             filterAndRenderFiles();
         } else {
@@ -283,7 +260,7 @@ function filterAndRenderFiles() {
     const emptyState = document.getElementById('empty-state');
     if (!container) return;
 
-    let filtered = oneDriveFiles.filter(file => {
+    let filtered = cloudFiles.filter(file => {
         const matchesCategory = (currentCategory === 'all') || (getFileCategory(file.name) === currentCategory);
         const matchesSearch = !currentSearch || file.name.toLowerCase().includes(currentSearch);
         return matchesCategory && matchesSearch;
@@ -307,7 +284,7 @@ function filterAndRenderFiles() {
 function createFileCard(file) {
     const isImage = getFileCategory(file.name) === 'image';
     const card = document.createElement('div');
-    card.className = 'file-card bg-white border border-slate-200/90 hover:border-brand-500/50 hover:shadow-glass rounded-2xl p-3 flex flex-col justify-between transition-all duration-200 group relative';
+    card.className = 'file-card bg-white border border-slate-200/90 hover:border-blue-500/50 hover:shadow-subtle rounded-2xl p-3 flex flex-col justify-between transition-all duration-200 group relative';
 
     // Thumbnail / Icon
     let thumbHtml = '';
@@ -315,7 +292,7 @@ function createFileCard(file) {
         const src = file.thumbnail || file.download_url;
         thumbHtml = `
             <div class="thumbnail-container w-full h-28 rounded-xl bg-slate-100 overflow-hidden mb-2.5 flex items-center justify-center relative cursor-pointer" onclick="openPreview('${file.id}')">
-                <img src="${src}" alt="${escapeHtml(file.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" onerror="this.onerror=null; this.parentElement.innerHTML='<i class=\\'${getFileIcon(file.name)} text-3xl text-brand-500\\'></i>';">
+                <img src="${src}" alt="${escapeHtml(file.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" onerror="this.onerror=null; this.parentElement.innerHTML='<i class=\\'${getFileIcon(file.name)} text-3xl text-blue-600\\'></i>';">
                 <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-semibold backdrop-blur-[1px]">
                     <i class="fa-solid fa-eye mr-1"></i> Xem
                 </div>
@@ -324,7 +301,7 @@ function createFileCard(file) {
     } else {
         thumbHtml = `
             <div class="thumbnail-container w-full h-28 rounded-xl bg-slate-50 border border-slate-100 mb-2.5 flex flex-col items-center justify-center relative cursor-pointer" onclick="openPreview('${file.id}')">
-                <i class="${getFileIcon(file.name)} text-3xl text-brand-500 mb-1.5 group-hover:scale-110 transition-transform"></i>
+                <i class="${getFileIcon(file.name)} text-3xl text-blue-600 mb-1.5 group-hover:scale-110 transition-transform"></i>
                 <span class="text-[10px] font-bold uppercase text-slate-400">${getFileExtension(file.name)}</span>
             </div>
         `;
@@ -340,13 +317,13 @@ function createFileCard(file) {
             </div>
         </div>
         <div class="file-actions mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1">
-            <button onclick="copyToClipboard('${file.download_url}')" class="p-1.5 px-2 bg-slate-50 hover:bg-sky-50 text-slate-600 hover:text-brand-500 rounded-lg text-xs font-semibold transition" title="Sao chép link tải">
+            <button onclick="copyToClipboard('${file.download_url}')" class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Sao chép link tải">
                 <i class="fa-regular fa-copy"></i>
             </button>
-            <button onclick="openQrModal('${file.id}')" class="p-1.5 px-2 bg-slate-50 hover:bg-sky-50 text-slate-600 hover:text-brand-500 rounded-lg text-xs font-semibold transition" title="Tạo mã QR">
+            <button onclick="openQrModal('${file.id}')" class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Tạo mã QR">
                 <i class="fa-solid fa-qrcode"></i>
             </button>
-            <a href="${file.download_url}" target="_blank" download class="p-1.5 px-2 bg-slate-50 hover:bg-sky-50 text-slate-600 hover:text-brand-500 rounded-lg text-xs font-semibold transition" title="Tải về">
+            <a href="${file.download_url}" target="_blank" download class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Tải về">
                 <i class="fa-solid fa-download"></i>
             </a>
             <button onclick="deleteFile('${file.id}', '${escapeHtml(file.name)}')" class="p-1.5 px-2 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition" title="Xóa tệp">
@@ -360,7 +337,7 @@ function createFileCard(file) {
 
 // 4. Delete File
 async function deleteFile(fileId, fileName) {
-    if (!confirm(`Bạn có chắc muốn xóa tệp "${fileName}" khỏi OneDrive?`)) return;
+    if (!confirm(`Bạn có chắc muốn xóa tệp "${fileName}"?`)) return;
 
     showToast(`Đang xóa tệp...`, 'info');
     try {
@@ -372,20 +349,20 @@ async function deleteFile(fileId, fileName) {
         const data = await res.json();
         if (data.success) {
             showToast(`✓ Đã xóa "${fileName}" thành công!`, 'success');
-            oneDriveFiles = oneDriveFiles.filter(f => f.id !== fileId);
+            cloudFiles = cloudFiles.filter(f => f.id !== fileId);
             updateCategoryCounts();
             filterAndRenderFiles();
         } else {
             showToast(`Lỗi: ${data.message}`, 'error');
         }
     } catch (e) {
-        showToast(`Không thể xóa tệp: ${e.message}`, 'error');
+        showToast(`Không thể xóa: ${e.message}`, 'error');
     }
 }
 
 // 5. QR Code Modal
 function openQrModal(fileId) {
-    const file = oneDriveFiles.find(f => f.id === fileId);
+    const file = cloudFiles.find(f => f.id === fileId);
     if (!file) return;
 
     const modal = document.getElementById('qr-modal');
@@ -436,7 +413,7 @@ function downloadQrImage(fileName) {
 
 // 6. Preview Modal
 function openPreview(fileId) {
-    const file = oneDriveFiles.find(f => f.id === fileId);
+    const file = cloudFiles.find(f => f.id === fileId);
     if (!file) return;
 
     const modal = document.getElementById('preview-modal');
@@ -462,7 +439,7 @@ function openPreview(fileId) {
     } else {
         bodyEl.innerHTML = `
             <div class="text-center p-8 text-white">
-                <i class="${getFileIcon(file.name)} text-6xl text-brand-500 mb-4"></i>
+                <i class="${getFileIcon(file.name)} text-6xl text-blue-500 mb-4"></i>
                 <p class="font-bold text-sm mb-1">${escapeHtml(file.name)}</p>
                 <p class="text-xs text-slate-400">Xem trực tiếp hoặc tải về máy</p>
             </div>
@@ -533,8 +510,8 @@ function getFileExtension(name) {
 }
 
 function updateCategoryCounts() {
-    const counts = { all: oneDriveFiles.length, image: 0, doc: 0, archive: 0, media: 0 };
-    oneDriveFiles.forEach(f => {
+    const counts = { all: cloudFiles.length, image: 0, doc: 0, archive: 0, media: 0 };
+    cloudFiles.forEach(f => {
         const cat = getFileCategory(f.name);
         if (counts[cat] !== undefined) counts[cat]++;
     });
