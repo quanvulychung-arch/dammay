@@ -1,5 +1,5 @@
 /**
- * CloudVault Pro - Dual-Mode Frontend Engine
+ * CloudVault Pro - NextGen Direct Streaming Engine
  * Master Admin Password: huannet123
  */
 
@@ -229,7 +229,7 @@ function handleAdminLogout() {
     showToast('Đã đăng xuất khỏi quyền Quản trị', 'info');
 }
 
-// 1. Upload Files
+// 1. ⚡ ULTRA-FAST: Direct-to-OneDrive Stream Upload with Live Progress Bar
 async function handleUploadFiles(files) {
     const queue = document.getElementById('upload-queue');
     const queueItems = document.getElementById('queue-items');
@@ -242,8 +242,8 @@ async function handleUploadFiles(files) {
         itemEl.className = 'bg-white border border-slate-200/90 rounded-2xl p-3.5 flex flex-col space-y-2 text-xs shadow-2xs animate-slide-down';
         itemEl.innerHTML = `
             <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-2.5 truncate max-w-[70%]">
-                    <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                <div class="flex items-center space-x-2.5 truncate max-w-[65%]">
+                    <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
                         <i class="${getFileIcon(file.name)}"></i>
                     </div>
                     <div class="truncate">
@@ -252,79 +252,117 @@ async function handleUploadFiles(files) {
                     </div>
                 </div>
                 <div class="status-box flex items-center space-x-1.5">
-                    <span class="text-blue-600 font-semibold text-[11px]"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Đang tải lên đám mây...</span>
+                    <span class="status-text text-blue-600 font-bold text-[11px]">
+                        <i class="fa-solid fa-bolt text-amber-500 mr-1 animate-pulse"></i> Đang tải lên 0%
+                    </span>
                 </div>
             </div>
-            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                <div class="progress-bar bg-blue-600 h-full w-2/3 animate-pulse transition-all duration-300"></div>
+            <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                <div class="progress-bar bg-gradient-to-r from-blue-500 to-indigo-600 h-full w-0 transition-all duration-150"></div>
             </div>
         `;
         if (queueItems) queueItems.prepend(itemEl);
         updateQueueCount();
 
+        const statusText = itemEl.querySelector('.status-text');
+        const progressBar = itemEl.querySelector('.progress-bar');
+
         try {
-            const formData = new FormData();
-            formData.append('file', file);
-
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
-
-            const uploadRes = await fetch(`${WORKER_URL}/upload`, {
+            // Step 1: Request Direct Upload Session (Takes 0.1s)
+            const sessionRes = await fetch(`${WORKER_URL}/create-upload-session`, {
                 method: 'POST',
-                body: formData,
-                signal: controller.signal
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: file.name, fileSize: file.size })
             });
-            clearTimeout(timeoutId);
 
-            let resData = null;
-            try {
-                resData = await uploadRes.json();
-            } catch (e) {
-                throw new Error(`Máy chủ phản hồi mã ${uploadRes.status}`);
+            const sessionData = await sessionRes.json();
+
+            if (!sessionRes.ok || !sessionData.success || !sessionData.uploadUrl) {
+                throw new Error(sessionData.message || 'Không thể khởi tạo đường truyền tải trực tiếp');
             }
 
-            if (uploadRes.ok && resData && resData.success) {
-                itemEl.classList.add('upload-done');
-                itemEl.className = 'bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between text-xs upload-done transition-all';
-                itemEl.innerHTML = `
-                    <div class="flex items-center space-x-2.5 truncate">
-                        <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
-                            <i class="fa-solid fa-check"></i>
-                        </div>
-                        <div class="truncate">
-                            <p class="font-semibold text-slate-800 truncate">${escapeHtml(file.name)}</p>
-                            <p class="text-[10px] text-emerald-600 font-medium">Đã lưu trữ an toàn</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-1.5">
-                        <button onclick="copyToClipboard('${resData.file.download_url}')" class="px-2.5 py-1 bg-white rounded-lg border border-emerald-200 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 transition">
-                            <i class="fa-regular fa-copy mr-1"></i> Copy Link
-                        </button>
-                    </div>
-                `;
-                showToast(`✓ Đã tải lên "${file.name}" thành công!`, 'success');
+            // Step 2: Upload directly to Microsoft OneDrive via XHR Streaming with 100% live %
+            const uploadedItem = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('PUT', sessionData.uploadUrl, true);
+                xhr.setRequestHeader('Content-Range', `bytes 0-${file.size - 1}/${file.size}`);
 
-                // Save to guest session
-                saveGuestRecentFile(resData.file);
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.min(99, Math.round((e.loaded / e.total) * 100));
+                        if (progressBar) progressBar.style.width = `${percent}%`;
+                        if (statusText) statusText.innerHTML = `<i class="fa-solid fa-bolt text-amber-500 mr-1"></i> Tải trực tiếp ${percent}%`;
+                    }
+                };
 
-                // If admin is active, refresh explorer
-                if (isAdmin()) {
-                    loadAdminCloudFiles();
-                }
-            } else {
-                throw new Error(resData?.message || `Lỗi tải lên (${uploadRes.status})`);
+                xhr.onload = () => {
+                    if (xhr.status === 200 || xhr.status === 201 || xhr.status === 202) {
+                        if (progressBar) progressBar.style.width = '100%';
+                        try {
+                            const resObj = JSON.parse(xhr.responseText);
+                            resolve(resObj);
+                        } catch (err) {
+                            resolve({ name: file.name, size: file.size });
+                        }
+                    } else {
+                        reject(new Error(`Microsoft Graph trả về lỗi: ${xhr.status}`));
+                    }
+                };
+
+                xhr.onerror = () => reject(new Error('Lỗi kết nối mạng khi tải lên Microsoft'));
+                xhr.ontimeout = () => reject(new Error('Hết thời gian tải lên'));
+                xhr.timeout = 180000; // 3 minutes timeout for huge files
+
+                xhr.send(file);
+            });
+
+            // Step 3: Complete & Get Anonymous Link
+            const completeRes = await fetch(`${WORKER_URL}/complete-upload`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(uploadedItem)
+            });
+
+            const completeData = await completeRes.json();
+            const finalFile = completeData.file || uploadedItem;
+
+            // Render Success State
+            itemEl.classList.add('upload-done');
+            itemEl.className = 'bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between text-xs upload-done transition-all';
+            itemEl.innerHTML = `
+                <div class="flex items-center space-x-2.5 truncate">
+                    <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
+                        <i class="fa-solid fa-check"></i>
+                    </div>
+                    <div class="truncate">
+                        <p class="font-semibold text-slate-800 truncate">${escapeHtml(file.name)}</p>
+                        <p class="text-[10px] text-emerald-600 font-medium">✓ Đã lưu trữ an toàn vào đám mây</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-1.5">
+                    <button onclick="copyToClipboard('${finalFile.download_url}')" class="px-2.5 py-1 bg-white rounded-lg border border-emerald-200 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 transition">
+                        <i class="fa-regular fa-copy mr-1"></i> Copy Link
+                    </button>
+                </div>
+            `;
+
+            showToast(`✓ Đã tải lên "${file.name}" thành công!`, 'success');
+            saveGuestRecentFile(finalFile);
+
+            if (isAdmin()) {
+                loadAdminCloudFiles();
             }
+
         } catch (err) {
-            const errMsg = err.name === 'AbortError' ? 'Quá thời gian tải lên (Timeout)' : err.message;
             itemEl.className = 'bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex items-center justify-between text-xs transition-all';
             itemEl.innerHTML = `
                 <div class="truncate pr-2">
                     <p class="font-semibold text-rose-800 truncate">${escapeHtml(file.name)}</p>
-                    <p class="text-[10px] text-rose-500 truncate">${escapeHtml(errMsg)}</p>
+                    <p class="text-[10px] text-rose-500 truncate">${escapeHtml(err.message)}</p>
                 </div>
                 <span class="text-rose-600 font-bold text-[11px] shrink-0"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Thất bại</span>
             `;
-            showToast(`Lỗi tải lên: ${errMsg}`, 'error');
+            showToast(`Lỗi: ${err.message}`, 'error');
         }
     }
 }
@@ -403,10 +441,6 @@ async function loadAdminCloudFiles() {
 
         if (data.success && Array.isArray(data.files)) {
             cloudFiles = data.files;
-            updateCategoryCounts();
-            filterAndRenderFiles();
-        } else if (Array.isArray(data)) {
-            cloudFiles = data;
             updateCategoryCounts();
             filterAndRenderFiles();
         } else {
