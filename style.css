@@ -1,57 +1,107 @@
-/* iOS Native Styling for OneDrive GitHub Pages */
-:root {
-    --ios-blue: #007AFF;
-    --onedrive-blue: #0078D4;
+/* Apple iOS & Tahoe Pro Design Enhancements */
+
+@keyframes scaleUp {
+    0% { transform: scale(0.95); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
 }
 
-.ios-navbar {
-    padding-top: env(safe-area-inset-top);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
+@keyframes slideDown {
+    0% { transform: translateY(-10px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
 }
 
-* {
-    -webkit-tap-highlight-color: transparent;
+.animate-scale-up {
+    animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.active-segment {
+.animate-slide-down {
+    animation: slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Category Tabs */
+.active-tab {
     background-color: #FFFFFF !important;
-    color: #000000 !important;
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+    color: #0F172A !important;
+    box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.08), 0 1px 4px -1px rgba(0, 0, 0, 0.04);
 }
 
-.inactive-segment {
-    color: #8E8E93;
+.inactive-tab {
+    color: #64748B;
 }
 
-.ios-file-card {
-    transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.2s ease;
+.inactive-tab:hover {
+    color: #1E293B;
 }
 
-.ios-file-card:active {
-    transform: scale(0.97);
+/* View Mode Buttons */
+.active-view {
+    background-color: #FFFFFF;
+    color: #0078D4;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
-@media (min-width: 640px) {
-    .ios-file-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
-    }
-}
-
+/* Drag & Drop Highlight */
 .dragover {
     border-color: #0078D4 !important;
-    background-color: rgba(0, 120, 212, 0.08) !important;
+    background-color: #F0F7FF !important;
     transform: scale(1.01);
 }
 
-@media (max-width: 639px) {
-    #preview-modal > div {
-        animation: slideUp 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-    }
+/* Hide scrollbar for category tabs on mobile */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
 }
 
-@keyframes slideUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
+/* List View Layout Overrides */
+.list-view-mode {
+    grid-template-columns: 1fr !important;
+    gap: 0.5rem !important;
+}
+
+.list-view-mode .file-card {
+    flex-direction: row !important;
+    align-items: center !important;
+    padding: 0.75rem 1rem !important;
+    height: auto !important;
+}
+
+.list-view-mode .file-card .thumbnail-container {
+    width: 44px !important;
+    height: 44px !important;
+    margin-bottom: 0 !important;
+    margin-right: 0.75rem !important;
+    flex-shrink: 0;
+}
+
+.list-view-mode .file-card .file-info {
+    flex: 1 !important;
+    min-width: 0 !important;
+}
+
+.list-view-mode .file-card .file-actions {
+    margin-top: 0 !important;
+    border-top: none !important;
+    padding-top: 0 !important;
+    justify-content: flex-end !important;
+}
+
+/* Toast Animation */
+.toast-item {
+    pointer-events: auto;
+    animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+
+/* iPhone Notch / Dynamic Island Safe Area */
+@supports (padding-top: env(safe-area-inset-top)) {
+    header {
+        padding-top: env(safe-area-inset-top);
+    }
+    main {
+        padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    }
 }

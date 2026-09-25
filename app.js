@@ -1,6 +1,6 @@
 /**
- * CloudDrop OneDrive - 100% Zero-Login Engine via Cloudflare Worker Gateway
- * Direct Upload & Share without asking users to log in!
+ * OneDrive CloudDrop Pro - Frontend Engine
+ * Direct Upload & Zero-Login Integration via Cloudflare Worker Gateway
  */
 
 const WORKER_URL = 'https://onedrive-upload.huannet2018.workers.dev';
@@ -8,12 +8,14 @@ const WORKER_URL = 'https://onedrive-upload.huannet2018.workers.dev';
 let oneDriveFiles = [];
 let currentCategory = 'all';
 let currentSearch = '';
+let isListView = false;
 let currentPreviewFile = null;
+let qrCodeInstance = null;
 
-// Initialize on page load
+// Initialization
 document.addEventListener('DOMContentLoaded', () => {
     initUI();
-    loadOneDriveFiles();
+    checkHealthAndLoad();
 });
 
 function initUI() {
@@ -25,7 +27,7 @@ function initUI() {
 
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length) {
-                handleUploadFiles(e.target.files);
+                handleUploadFiles(Array.from(e.target.files));
                 fileInput.value = '';
             }
         });
@@ -48,8 +50,19 @@ function initUI() {
             e.preventDefault();
             dropZone.classList.remove('dragover');
             if (e.dataTransfer.files.length) {
-                handleUploadFiles(e.dataTransfer.files);
+                handleUploadFiles(Array.from(e.dataTransfer.files));
             }
+        });
+    }
+
+    // Refresh button
+    const refreshBtn = document.getElementById('btn-refresh');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            refreshBtn.querySelector('i').classList.add('fa-spin');
+            loadOneDriveFiles().finally(() => {
+                setTimeout(() => refreshBtn.querySelector('i').classList.remove('fa-spin'), 600);
+            });
         });
     }
 
@@ -60,51 +73,98 @@ function initUI() {
             const btn = e.target.closest('.cat-btn');
             if (!btn) return;
             document.querySelectorAll('.cat-btn').forEach(b => {
-                b.classList.remove('active-segment');
-                b.classList.add('inactive-segment');
+                b.classList.remove('active-tab');
+                b.classList.add('inactive-tab');
             });
-            btn.classList.add('active-segment');
-            btn.classList.remove('inactive-segment');
+            btn.classList.add('active-tab');
+            btn.classList.remove('inactive-tab');
             currentCategory = btn.dataset.cat;
             filterAndRenderFiles();
         });
     }
 
-    // Search input
+    // Search Input
     const searchInput = document.getElementById('search-input');
+    const clearSearchBtn = document.getElementById('btn-clear-search');
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
             currentSearch = e.target.value.trim().toLowerCase();
+            if (clearSearchBtn) {
+                clearSearchBtn.classList.toggle('hidden', !currentSearch);
+            }
+            filterAndRenderFiles();
+        });
+    }
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            currentSearch = '';
+            clearSearchBtn.classList.add('hidden');
             filterAndRenderFiles();
         });
     }
 
-    // Modal background close
-    const modalEl = document.getElementById('preview-modal');
-    if (modalEl) {
-        modalEl.addEventListener('click', (e) => {
-            if (e.target.id === 'preview-modal') {
-                closePreviewModal();
-            }
+    // View Switcher
+    const btnGrid = document.getElementById('btn-view-grid');
+    const btnList = document.getElementById('btn-view-list');
+    const container = document.getElementById('files-container');
+    if (btnGrid && btnList && container) {
+        btnGrid.addEventListener('click', () => {
+            isListView = false;
+            btnGrid.classList.add('active-view');
+            btnGrid.classList.remove('text-slate-500');
+            btnList.classList.remove('active-view');
+            btnList.classList.add('text-slate-500');
+            container.classList.remove('list-view-mode');
+        });
+        btnList.addEventListener('click', () => {
+            isListView = true;
+            btnList.classList.add('active-view');
+            btnList.classList.remove('text-slate-500');
+            btnGrid.classList.remove('active-view');
+            btnGrid.classList.add('text-slate-500');
+            container.classList.add('list-view-mode');
         });
     }
 
-    renderHeaderStatus();
-}
-
-function renderHeaderStatus() {
-    const container = document.getElementById('auth-actions');
-    if (container) {
-        container.innerHTML = `
-            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm">
-                <span class="w-2 h-2 mr-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                OneDrive Cloud Online
-            </span>
-        `;
+    // Clear Upload Queue
+    const clearQueueBtn = document.getElementById('btn-clear-queue');
+    if (clearQueueBtn) {
+        clearQueueBtn.addEventListener('click', () => {
+            const queueItems = document.getElementById('queue-items');
+            if (queueItems) {
+                const doneItems = queueItems.querySelectorAll('.upload-done');
+                doneItems.forEach(el => el.remove());
+                updateQueueCount();
+            }
+        });
     }
 }
 
-// 1. Upload File directly via Cloudflare Worker Gateway
+// 0. Check Health & Connect
+async function checkHealthAndLoad() {
+    const badge = document.getElementById('cloud-status-badge');
+    const statusText = document.getElementById('status-text');
+
+    try {
+        const res = await fetch(`${WORKER_URL}/status`);
+        const data = await res.json();
+
+        if (data.success) {
+            statusText.innerText = data.user ? `OneDrive: ${data.user}` : 'OneDrive Cloud Online';
+            badge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm';
+        } else {
+            statusText.innerText = 'Cần kiểm tra Token';
+            badge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 shadow-sm';
+        }
+    } catch (e) {
+        if (statusText) statusText.innerText = 'Cloudflare Worker Online';
+    }
+
+    loadOneDriveFiles();
+}
+
+// 1. Upload Files
 async function handleUploadFiles(files) {
     const queue = document.getElementById('upload-queue');
     const queueItems = document.getElementById('queue-items');
@@ -114,15 +174,28 @@ async function handleUploadFiles(files) {
         const queueId = 'q-' + Math.random().toString(36).substr(2, 9);
         const itemEl = document.createElement('div');
         itemEl.id = queueId;
-        itemEl.className = 'bg-[#F2F2F7] rounded-[14px] p-3 flex items-center justify-between text-xs transition-all';
+        itemEl.className = 'bg-white border border-slate-200/90 rounded-2xl p-3.5 flex flex-col space-y-2 text-xs shadow-2xs animate-slide-down';
         itemEl.innerHTML = `
-            <div class="truncate pr-2">
-                <span class="font-medium text-black truncate">${escapeHtml(file.name)}</span>
-                <span class="text-[#8E8E93] text-[10px]"> (${formatBytes(file.size)})</span>
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2.5 truncate max-w-[70%]">
+                    <div class="w-7 h-7 rounded-lg bg-sky-50 text-brand-500 flex items-center justify-center font-bold">
+                        <i class="${getFileIcon(file.name)}"></i>
+                    </div>
+                    <div class="truncate">
+                        <p class="font-semibold text-slate-800 truncate">${escapeHtml(file.name)}</p>
+                        <p class="text-[10px] text-slate-400">${formatBytes(file.size)}</p>
+                    </div>
+                </div>
+                <div class="status-box flex items-center space-x-1.5">
+                    <span class="text-brand-500 font-semibold text-[11px]"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Đang tải lên...</span>
+                </div>
             </div>
-            <span class="status font-semibold text-[#0078D4]"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên OneDrive...</span>
+            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                <div class="progress-bar bg-brand-500 h-full w-2/3 animate-pulse transition-all duration-300"></div>
+            </div>
         `;
         if (queueItems) queueItems.prepend(itemEl);
+        updateQueueCount();
 
         try {
             const formData = new FormData();
@@ -136,240 +209,365 @@ async function handleUploadFiles(files) {
             const resData = await uploadRes.json();
 
             if (uploadRes.ok && resData.success) {
-                itemEl.className = 'bg-emerald-50 rounded-[14px] p-3 flex items-center justify-between text-xs transition-all';
-                itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-check text-emerald-600"></i> Thành công';
-                showToast(`Đã tải lên "${file.name}" vào OneDrive!`, 'success');
-                setTimeout(() => { itemEl.remove(); }, 3000);
+                itemEl.classList.add('upload-done');
+                itemEl.className = 'bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between text-xs upload-done transition-all';
+                itemEl.innerHTML = `
+                    <div class="flex items-center space-x-2.5 truncate">
+                        <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
+                            <i class="fa-solid fa-check"></i>
+                        </div>
+                        <div class="truncate">
+                            <p class="font-semibold text-slate-800 truncate">${escapeHtml(file.name)}</p>
+                            <p class="text-[10px] text-emerald-600 font-medium">Đã lưu vào OneDrive</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1.5">
+                        <button onclick="copyToClipboard('${resData.file.download_url}')" class="px-2.5 py-1 bg-white rounded-lg border border-emerald-200 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50">
+                            <i class="fa-regular fa-copy mr-1"></i> Copy Link
+                        </button>
+                    </div>
+                `;
+                showToast(`✓ Đã tải lên "${file.name}" thành công!`, 'success');
+                loadOneDriveFiles();
             } else {
-                throw new Error(resData.message || 'Lỗi tải lên máy chủ');
+                throw new Error(resData.message || 'Lỗi không xác định từ máy chủ');
             }
         } catch (err) {
-            console.error("Upload error:", err);
-            itemEl.className = 'bg-red-50 rounded-[14px] p-3 flex items-center justify-between text-xs transition-all';
-            itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-xmark text-red-500"></i> Lỗi';
-            showToast(`Lỗi khi tải "${file.name}": ` + err.message, 'error');
+            itemEl.className = 'bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex items-center justify-between text-xs transition-all';
+            itemEl.innerHTML = `
+                <div class="truncate pr-2">
+                    <p class="font-semibold text-rose-800 truncate">${escapeHtml(file.name)}</p>
+                    <p class="text-[10px] text-rose-500 truncate">${escapeHtml(err.message)}</p>
+                </div>
+                <span class="text-rose-600 font-bold text-[11px] shrink-0"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Thất bại</span>
+            `;
+            showToast(`Lỗi: ${err.message}`, 'error');
         }
     }
-
-    await loadOneDriveFiles();
 }
 
-// 2. Load Files from OneDrive via Cloudflare Gateway
+function updateQueueCount() {
+    const queueItems = document.getElementById('queue-items');
+    const queueCount = document.getElementById('queue-count');
+    const queue = document.getElementById('upload-queue');
+    if (queueItems && queueCount) {
+        const count = queueItems.children.length;
+        queueCount.innerText = count;
+        if (count === 0 && queue) queue.classList.add('hidden');
+    }
+}
+
+// 2. Fetch OneDrive Files
 async function loadOneDriveFiles() {
     try {
         const res = await fetch(`${WORKER_URL}/files`);
-        if (res.ok) {
-            const data = await res.json();
-            oneDriveFiles = data.files || [];
-            updateStats(oneDriveFiles);
+        if (!res.ok) throw new Error('Không thể tải danh sách tệp');
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.files)) {
+            oneDriveFiles = data.files;
+            updateCategoryCounts();
             filterAndRenderFiles();
+        } else {
+            renderEmptyState();
         }
-    } catch (err) {
-        console.error("Load files error:", err);
+    } catch (e) {
+        console.error("List files error:", e);
+        renderEmptyState();
     }
 }
 
-function updateStats(files) {
-    let imgCount = 0;
-    let docCount = 0;
-    let medCount = 0;
-
-    files.forEach(f => {
-        const ext = (f.name.split('.').pop() || '').toLowerCase();
-        const cat = getCategory(ext);
-        if (cat === 'image') imgCount++;
-        else if (cat === 'document') docCount++;
-        else if (cat === 'media') medCount++;
-    });
-
-    const cAll = document.getElementById('count-all');
-    const cImg = document.getElementById('count-image');
-    const cDoc = document.getElementById('count-document');
-    const cMed = document.getElementById('count-media');
-
-    if (cAll) cAll.innerText = files.length;
-    if (cImg) cImg.innerText = imgCount;
-    if (cDoc) cDoc.innerText = docCount;
-    if (cMed) cMed.innerText = medCount;
-}
-
+// 3. Filter and Render Files
 function filterAndRenderFiles() {
-    const grid = document.getElementById('files-grid');
-    const empty = document.getElementById('empty-state');
+    const container = document.getElementById('files-container');
+    const emptyState = document.getElementById('empty-state');
+    if (!container) return;
 
-    let list = oneDriveFiles.filter(item => {
-        const ext = (item.name.split('.').pop() || '').toLowerCase();
-        const cat = getCategory(ext);
-
-        if (currentCategory !== 'all' && cat !== currentCategory) return false;
-        if (currentSearch && !item.name.toLowerCase().includes(currentSearch)) return false;
-        return true;
+    let filtered = oneDriveFiles.filter(file => {
+        const matchesCategory = (currentCategory === 'all') || (getFileCategory(file.name) === currentCategory);
+        const matchesSearch = !currentSearch || file.name.toLowerCase().includes(currentSearch);
+        return matchesCategory && matchesSearch;
     });
 
-    if (!list.length) {
-        if (grid) grid.innerHTML = '';
-        if (empty) empty.classList.remove('hidden');
+    if (filtered.length === 0) {
+        container.innerHTML = '';
+        if (emptyState) emptyState.classList.remove('hidden');
         return;
     }
 
-    if (empty) empty.classList.add('hidden');
-    if (grid) {
-        grid.innerHTML = list.map(f => {
-            const ext = (f.name.split('.').pop() || '').toLowerCase();
-            const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext);
-            const thumb = f.thumbnail;
-            const downloadUrl = f.download_url || f.web_url;
+    if (emptyState) emptyState.classList.add('hidden');
+    container.innerHTML = '';
 
-            return `
-                <div class="ios-file-card bg-white rounded-[20px] border border-[rgba(60,60,67,0.08)] overflow-hidden shadow-sm flex flex-col cursor-pointer" onclick="openFilePreview('${f.id}')">
-                    <div class="h-32 bg-[#F2F2F7] flex items-center justify-center relative overflow-hidden">
-                        ${isImg && thumb 
-                            ? `<img src="${thumb}" class="w-full h-full object-cover">` 
-                            : `<div class="text-4xl text-[#0078D4]">${getFileIcon(ext)}</div>`
-                        }
-                        <span class="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-black/60 text-white backdrop-blur-md">
-                            ${ext}
-                        </span>
-                    </div>
-                    <div class="p-3 flex-1 flex flex-col justify-between">
-                        <h4 class="text-xs font-semibold text-black truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</h4>
-                        <div class="flex items-center justify-between text-[11px] text-[#8E8E93] mt-1">
-                            <span>${formatBytes(f.size)}</span>
-                            <button onclick="event.stopPropagation(); copyLink('${downloadUrl}')" class="text-[#0078D4] font-semibold flex items-center">
-                                <i class="fa-solid fa-link text-[10px] mr-1"></i> Chép Link
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    }
+    filtered.forEach(file => {
+        const card = createFileCard(file);
+        container.appendChild(card);
+    });
 }
 
-function openFilePreview(fileId) {
-    const f = oneDriveFiles.find(item => item.id === fileId);
-    if (!f) return;
+function createFileCard(file) {
+    const isImage = getFileCategory(file.name) === 'image';
+    const card = document.createElement('div');
+    card.className = 'file-card bg-white border border-slate-200/90 hover:border-brand-500/50 hover:shadow-glass rounded-2xl p-3 flex flex-col justify-between transition-all duration-200 group relative';
 
-    currentPreviewFile = f;
-    const downloadUrl = f.download_url || f.web_url;
-
-    document.getElementById('modal-file-name').innerText = f.name;
-    document.getElementById('modal-file-size').innerText = formatBytes(f.size);
-    document.getElementById('modal-file-date').innerText = new Date(f.created_at).toLocaleDateString('vi-VN');
-    document.getElementById('modal-direct-link').value = downloadUrl;
-    document.getElementById('modal-download-btn').href = f.web_url;
-
-    const previewBox = document.getElementById('modal-preview-container');
-    const ext = (f.name.split('.').pop() || '').toLowerCase();
-    
-    if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
-        previewBox.innerHTML = `<img src="${downloadUrl}" class="max-h-[260px] w-auto max-w-full object-contain">`;
+    // Thumbnail / Icon
+    let thumbHtml = '';
+    if (isImage && (file.thumbnail || file.download_url)) {
+        const src = file.thumbnail || file.download_url;
+        thumbHtml = `
+            <div class="thumbnail-container w-full h-28 rounded-xl bg-slate-100 overflow-hidden mb-2.5 flex items-center justify-center relative cursor-pointer" onclick="openPreview('${file.id}')">
+                <img src="${src}" alt="${escapeHtml(file.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" onerror="this.onerror=null; this.parentElement.innerHTML='<i class=\\'${getFileIcon(file.name)} text-3xl text-brand-500\\'></i>';">
+                <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-semibold backdrop-blur-[1px]">
+                    <i class="fa-solid fa-eye mr-1"></i> Xem
+                </div>
+            </div>
+        `;
     } else {
-        previewBox.innerHTML = `
-            <div class="p-6 text-center text-white space-y-2">
-                <div class="text-5xl text-[#0078D4] mb-1">${getFileIcon(ext)}</div>
-                <div class="text-xs font-semibold">${escapeHtml(f.name)}</div>
+        thumbHtml = `
+            <div class="thumbnail-container w-full h-28 rounded-xl bg-slate-50 border border-slate-100 mb-2.5 flex flex-col items-center justify-center relative cursor-pointer" onclick="openPreview('${file.id}')">
+                <i class="${getFileIcon(file.name)} text-3xl text-brand-500 mb-1.5 group-hover:scale-110 transition-transform"></i>
+                <span class="text-[10px] font-bold uppercase text-slate-400">${getFileExtension(file.name)}</span>
             </div>
         `;
     }
 
-    // Delete Button
-    document.getElementById('modal-delete-btn').onclick = async () => {
-        if (confirm(`Xóa tệp "${f.name}" khỏi OneDrive?`)) {
-            try {
-                const res = await fetch(`${WORKER_URL}/delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: f.id })
-                });
-                if (res.ok) {
-                    showToast("Đã xóa tệp thành công!", "success");
-                    closePreviewModal();
-                    await loadOneDriveFiles();
-                } else {
-                    throw new Error("Không thể xóa tệp");
-                }
-            } catch (e) {
-                showToast("Lỗi khi xóa tệp", "error");
-            }
-        }
-    };
+    card.innerHTML = `
+        ${thumbHtml}
+        <div class="file-info min-w-0">
+            <h4 class="font-bold text-xs text-slate-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</h4>
+            <div class="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                <span>${formatBytes(file.size)}</span>
+                <span>${formatDate(file.created_at)}</span>
+            </div>
+        </div>
+        <div class="file-actions mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1">
+            <button onclick="copyToClipboard('${file.download_url}')" class="p-1.5 px-2 bg-slate-50 hover:bg-sky-50 text-slate-600 hover:text-brand-500 rounded-lg text-xs font-semibold transition" title="Sao chép link tải">
+                <i class="fa-regular fa-copy"></i>
+            </button>
+            <button onclick="openQrModal('${file.id}')" class="p-1.5 px-2 bg-slate-50 hover:bg-sky-50 text-slate-600 hover:text-brand-500 rounded-lg text-xs font-semibold transition" title="Tạo mã QR">
+                <i class="fa-solid fa-qrcode"></i>
+            </button>
+            <a href="${file.download_url}" target="_blank" download class="p-1.5 px-2 bg-slate-50 hover:bg-sky-50 text-slate-600 hover:text-brand-500 rounded-lg text-xs font-semibold transition" title="Tải về">
+                <i class="fa-solid fa-download"></i>
+            </a>
+            <button onclick="deleteFile('${file.id}', '${escapeHtml(file.name)}')" class="p-1.5 px-2 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition" title="Xóa tệp">
+                <i class="fa-regular fa-trash-can"></i>
+            </button>
+        </div>
+    `;
 
-    // QR Code
-    const qr = document.getElementById('qrcode-box');
-    qr.innerHTML = '';
-    if (typeof QRCode !== 'undefined') {
-        new QRCode(qr, { text: downloadUrl, width: 56, height: 56 });
+    return card;
+}
+
+// 4. Delete File
+async function deleteFile(fileId, fileName) {
+    if (!confirm(`Bạn có chắc muốn xóa tệp "${fileName}" khỏi OneDrive?`)) return;
+
+    showToast(`Đang xóa tệp...`, 'info');
+    try {
+        const res = await fetch(`${WORKER_URL}/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: fileId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`✓ Đã xóa "${fileName}" thành công!`, 'success');
+            oneDriveFiles = oneDriveFiles.filter(f => f.id !== fileId);
+            updateCategoryCounts();
+            filterAndRenderFiles();
+        } else {
+            showToast(`Lỗi: ${data.message}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Không thể xóa tệp: ${e.message}`, 'error');
+    }
+}
+
+// 5. QR Code Modal
+function openQrModal(fileId) {
+    const file = oneDriveFiles.find(f => f.id === fileId);
+    if (!file) return;
+
+    const modal = document.getElementById('qr-modal');
+    const nameEl = document.getElementById('qr-file-name');
+    const qrCanvas = document.getElementById('qr-code-canvas');
+    const copyBtn = document.getElementById('btn-copy-qr-link');
+    const downloadBtn = document.getElementById('btn-download-qr-img');
+
+    if (nameEl) nameEl.innerText = file.name;
+    if (qrCanvas) {
+        qrCanvas.innerHTML = '';
+        qrCodeInstance = new QRCode(qrCanvas, {
+            text: file.download_url,
+            width: 170,
+            height: 170,
+            colorDark: "#0F172A",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+        });
     }
 
-    document.getElementById('preview-modal').classList.remove('hidden');
+    if (copyBtn) {
+        copyBtn.onclick = () => copyToClipboard(file.download_url);
+    }
+    if (downloadBtn) {
+        downloadBtn.onclick = () => downloadQrImage(file.name);
+    }
+
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeQrModal() {
+    const modal = document.getElementById('qr-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function downloadQrImage(fileName) {
+    const qrCanvas = document.getElementById('qr-code-canvas');
+    const img = qrCanvas.querySelector('img') || qrCanvas.querySelector('canvas');
+    if (!img) return;
+
+    const link = document.createElement('a');
+    link.href = img.src || (img.toDataURL ? img.toDataURL('image/png') : '#');
+    link.download = `QR_${fileName}.png`;
+    link.click();
+    showToast('✓ Đã lưu ảnh mã QR!', 'success');
+}
+
+// 6. Preview Modal
+function openPreview(fileId) {
+    const file = oneDriveFiles.find(f => f.id === fileId);
+    if (!file) return;
+
+    const modal = document.getElementById('preview-modal');
+    const titleEl = document.getElementById('preview-title');
+    const metaEl = document.getElementById('preview-meta');
+    const bodyEl = document.getElementById('preview-body');
+    const copyBtn = document.getElementById('btn-preview-copy');
+    const downloadBtn = document.getElementById('btn-preview-download');
+    const qrBtn = document.getElementById('btn-preview-qr');
+
+    if (titleEl) titleEl.innerText = file.name;
+    if (metaEl) metaEl.innerText = `${formatBytes(file.size)} • ${formatDate(file.created_at)}`;
+    
+    if (copyBtn) copyBtn.onclick = () => copyToClipboard(file.download_url);
+    if (downloadBtn) downloadBtn.href = file.download_url;
+    if (qrBtn) qrBtn.onclick = () => { closePreviewModal(); openQrModal(fileId); };
+
+    const cat = getFileCategory(file.name);
+    if (cat === 'image') {
+        bodyEl.innerHTML = `<img src="${file.download_url}" class="max-h-[60vh] max-w-full object-contain rounded-lg shadow-lg">`;
+    } else if (cat === 'media') {
+        bodyEl.innerHTML = `<video src="${file.download_url}" controls autoplay class="max-h-[60vh] max-w-full rounded-lg shadow-lg"></video>`;
+    } else {
+        bodyEl.innerHTML = `
+            <div class="text-center p-8 text-white">
+                <i class="${getFileIcon(file.name)} text-6xl text-brand-500 mb-4"></i>
+                <p class="font-bold text-sm mb-1">${escapeHtml(file.name)}</p>
+                <p class="text-xs text-slate-400">Xem trực tiếp hoặc tải về máy</p>
+            </div>
+        `;
+    }
+
+    if (modal) modal.classList.remove('hidden');
 }
 
 function closePreviewModal() {
-    document.getElementById('preview-modal').classList.add('hidden');
+    const modal = document.getElementById('preview-modal');
+    const bodyEl = document.getElementById('preview-body');
+    if (bodyEl) bodyEl.innerHTML = '';
+    if (modal) modal.classList.add('hidden');
 }
 
-function copyLink(url) {
-    navigator.clipboard.writeText(url).then(() => {
-        showToast("Đã sao chép link OneDrive!", "success");
+// Utilities
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('✓ Đã sao chép liên kết tải trực tiếp!', 'success');
+    }).catch(() => {
+        showToast('Không thể tự động copy link', 'error');
     });
 }
 
-function copyToClipboard(inputId, btn) {
-    const val = document.getElementById(inputId).value;
-    copyLink(val);
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    const bgClass = type === 'success' ? 'bg-slate-900 text-white' : (type === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white');
+    toast.className = `toast-item ${bgClass} px-4 py-3 rounded-2xl text-xs font-semibold shadow-xl flex items-center space-x-2 border border-white/10`;
+    toast.innerHTML = `<span>${escapeHtml(message)}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 2800);
 }
 
-function shareNativeFile() {
-    if (!currentPreviewFile) return;
-    const url = currentPreviewFile.download_url || currentPreviewFile.web_url;
-    if (navigator.share) {
-        navigator.share({ title: currentPreviewFile.name, url: url });
-    } else {
-        copyLink(url);
+function getFileCategory(name) {
+    const ext = getFileExtension(name);
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic', 'bmp', 'ico'].includes(ext)) return 'image';
+    if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'].includes(ext)) return 'doc';
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) return 'archive';
+    if (['mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'm4a', 'flac'].includes(ext)) return 'media';
+    return 'doc';
+}
+
+function getFileIcon(name) {
+    const ext = getFileExtension(name);
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic'].includes(ext)) return 'fa-regular fa-image';
+    if (['pdf'].includes(ext)) return 'fa-regular fa-file-pdf text-rose-500';
+    if (['doc', 'docx'].includes(ext)) return 'fa-regular fa-file-word text-blue-600';
+    if (['xls', 'xlsx'].includes(ext)) return 'fa-regular fa-file-excel text-emerald-600';
+    if (['ppt', 'pptx'].includes(ext)) return 'fa-regular fa-file-powerpoint text-orange-600';
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'fa-regular fa-file-zipper text-amber-500';
+    if (['mp4', 'mov', 'avi'].includes(ext)) return 'fa-regular fa-file-video text-purple-500';
+    if (['mp3', 'wav', 'm4a'].includes(ext)) return 'fa-regular fa-file-audio text-pink-500';
+    return 'fa-regular fa-file';
+}
+
+function getFileExtension(name) {
+    return (name.split('.').pop() || '').toLowerCase();
+}
+
+function updateCategoryCounts() {
+    const counts = { all: oneDriveFiles.length, image: 0, doc: 0, archive: 0, media: 0 };
+    oneDriveFiles.forEach(f => {
+        const cat = getFileCategory(f.name);
+        if (counts[cat] !== undefined) counts[cat]++;
+    });
+    for (let key in counts) {
+        const el = document.getElementById(`count-${key}`);
+        if (el) el.innerText = counts[key];
     }
 }
 
-// Helpers
-function getCategory(ext) {
-    if (['jpg','jpeg','png','gif','webp','svg'].includes(ext)) return 'image';
-    if (['pdf','doc','docx','xls','xlsx','ppt','pptx','txt'].includes(ext)) return 'document';
-    if (['mp4','mov','mp3','wav','m4a'].includes(ext)) return 'media';
-    return 'other';
+function renderEmptyState() {
+    const container = document.getElementById('files-container');
+    const emptyState = document.getElementById('empty-state');
+    if (container) container.innerHTML = '';
+    if (emptyState) emptyState.classList.remove('hidden');
 }
 
-function getFileIcon(ext) {
-    const map = {
-        pdf: '<i class="fa-solid fa-file-pdf text-red-500"></i>',
-        doc: '<i class="fa-solid fa-file-word text-blue-500"></i>',
-        docx: '<i class="fa-solid fa-file-word text-blue-500"></i>',
-        xls: '<i class="fa-solid fa-file-excel text-emerald-600"></i>',
-        xlsx: '<i class="fa-solid fa-file-excel text-emerald-600"></i>',
-        mp4: '<i class="fa-solid fa-file-video text-violet-500"></i>',
-        mov: '<i class="fa-solid fa-file-video text-violet-500"></i>',
-        zip: '<i class="fa-solid fa-file-zipper text-yellow-600"></i>',
-        rar: '<i class="fa-solid fa-file-zipper text-yellow-600"></i>'
-    };
-    return map[ext] || '<i class="fa-solid fa-file text-[#0078D4]"></i>';
+function formatBytes(bytes, decimals = 2) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-function escapeHtml(text) {
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-    return String(text).replace(/[&<>"']/g, m => map[m]);
+function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 }
 
-function formatBytes(bytes) {
-    if (!+bytes) return '0 B';
-    const k = 1024, sizes = ['B','KB','MB','GB','TB'];
-    const i = Math.floor(Math.log(bytes)/Math.log(k));
-    return `${parseFloat((bytes/Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
-
-function showToast(msg, type='info') {
-    const c = document.getElementById('toast-container');
-    const t = document.createElement('div');
-    t.className = `bg-white/95 backdrop-blur-xl text-black px-4 py-2.5 rounded-full shadow-lg border border-gray-200 text-xs font-semibold flex items-center space-x-2`;
-    t.innerHTML = `<span>${msg}</span>`;
-    if (c) c.appendChild(t);
-    setTimeout(() => t.remove(), 3500);
+function escapeHtml(str) {
+    return (str || '').replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[m]));
 }
