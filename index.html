@@ -79,17 +79,13 @@
     <!-- Main App Container -->
     <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-5 space-y-5 pb-24 sm:pb-12">
         
-        <!-- Setup Notice Banner (If Client ID missing) -->
-        <div id="setup-banner" class="hidden bg-gradient-to-r from-amber-500 to-orange-500 rounded-[22px] p-4 text-white shadow-md flex items-center justify-between gap-3 text-xs">
-            <div class="flex items-center space-x-3">
-                <i class="fa-solid fa-triangle-exclamation text-xl flex-shrink-0"></i>
-                <div>
-                    <strong>Chưa cấu hình Microsoft Client ID:</strong> Vui lòng bấm vào bánh răng cài đặt để nhập Client ID của bạn.
-                </div>
+        <!-- Detailed Error Notice (If Login encounters error) -->
+        <div id="error-banner" class="hidden bg-red-50 border border-red-200 rounded-[20px] p-4 text-red-700 shadow-sm text-xs space-y-1">
+            <div class="font-bold flex items-center">
+                <i class="fa-solid fa-circle-exclamation mr-2 text-base text-red-500"></i>
+                <span id="error-banner-title">Thông báo lỗi từ Microsoft:</span>
             </div>
-            <button onclick="openConfigModal()" class="px-3 py-1.5 bg-white text-orange-600 font-bold rounded-full whitespace-nowrap shadow-sm">
-                Cài Đặt Ngay
-            </button>
+            <p id="error-banner-desc" class="font-mono text-[11px] break-all"></p>
         </div>
 
         <!-- Upload Zone (Authenticated Admin) -->
@@ -252,16 +248,24 @@
                 <h3 class="text-base font-bold text-black">Cấu Hình Microsoft App ID</h3>
                 <button onclick="closeConfigModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <p class="text-xs text-[#8E8E93]">Nhập Client ID từ Microsoft Azure App Registration để cấp quyền upload lên OneDrive của bạn trên GitHub Pages.</p>
             
             <div>
                 <label class="text-xs font-semibold text-gray-700 block mb-1">Application (Client) ID:</label>
-                <input type="text" id="config-client-id" placeholder="vd: 5a8e1234-xxxx-xxxx-xxxx-xxxxxxxxxxxx" 
+                <input type="text" id="config-client-id" placeholder="vd: cde527a1-c2b6-4203-80a3-fe29e8cd9faf" 
                     class="w-full px-3 py-2 bg-[#F2F2F7] border border-gray-200 rounded-[12px] text-xs font-mono outline-none focus:border-[#0078D4]">
             </div>
 
-            <button onclick="saveClientId()" class="w-full py-2.5 bg-[#0078D4] text-white text-xs font-bold rounded-[12px] shadow-sm">
-                Lưu Cấu Hình
+            <div>
+                <label class="text-xs font-semibold text-gray-700 block mb-1">Loại tài khoản Microsoft:</label>
+                <select id="config-authority-type" class="w-full px-3 py-2 bg-[#F2F2F7] border border-gray-200 rounded-[12px] text-xs outline-none focus:border-[#0078D4]">
+                    <option value="common">Tất cả tài khoản (Mặc định)</option>
+                    <option value="consumers">Tài khoản Cá nhân (@outlook, @hotmail, @gmail)</option>
+                    <option value="organizations">Tài khoản Tổ chức / Doanh nghiệp / Trường học</option>
+                </select>
+            </div>
+
+            <button onclick="saveClientId()" class="w-full py-2.5 bg-[#0078D4] text-white text-xs font-bold rounded-[12px] shadow-sm active:scale-95 transition-all">
+                Lưu Cấu Hình & Tải Lại
             </button>
         </div>
     </div>
