@@ -1,263 +1,151 @@
 /**
- * CloudDrop OneDrive - Native OAuth2 PKCE Engine (Official Microsoft Standard for SPA)
- * 100% Works without requiring Implicit Grant checkboxes
+ * CloudDrop OneDrive - 100% Zero-Login Engine via Cloudflare Worker Gateway
+ * Direct Upload & Share without asking users to log in!
  */
 
-// Configuration
-let CLIENT_ID = localStorage.getItem('onedrive_client_id') || '63568711-b221-4706-b9bf-4e4ad16f9bcf';
-let AUTH_TYPE = localStorage.getItem('onedrive_auth_type') || 'common';
+const WORKER_URL = 'https://onedrive-upload.huannet2018.workers.dev';
 
-// Current page redirect URI
-const currentRedirectUri = window.location.origin + window.location.pathname;
-
-let currentAccount = null;
 let oneDriveFiles = [];
 let currentCategory = 'all';
 let currentSearch = '';
 let currentPreviewFile = null;
 
-// PKCE Helper Functions (Native Web Crypto API)
-function generateRandomString(length = 64) {
-    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-    let result = '';
-    const values = new Uint32Array(length);
-    crypto.getRandomValues(values);
-    for (let i = 0; i < length; i++) {
-        result += charset[values[i] % charset.length];
-    }
-    return result;
-}
-
-async function generateCodeChallenge(verifier) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-}
-
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
     initUI();
-    await handleOAuthCallback();
-    await checkSavedToken();
+    loadOneDriveFiles();
 });
 
-// 1. Handle OAuth Code / Token in URL Query or Hash
-async function handleOAuthCallback() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const error = urlParams.get('error');
-    const errorDesc = urlParams.get('error_description');
+function initUI() {
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
 
-    if (error) {
-        showErrorBanner("Lỗi từ Microsoft", decodeURIComponent(errorDesc || error));
-        window.history.replaceState({}, document.title, window.location.pathname);
-        return;
-    }
+    if (dropZone && fileInput) {
+        dropZone.addEventListener('click', () => fileInput.click());
 
-    // Exchange Auth Code for Access Token via PKCE
-    if (code) {
-        const verifier = localStorage.getItem('onedrive_pkce_verifier');
-        if (!verifier) {
-            showErrorBanner("Lỗi PKCE", "Không tìm thấy mã xác thực phiên. Vui lòng bấm đăng nhập lại.");
-            return;
-        }
-
-        try {
-            showToast("Đang xác thực tài khoản Microsoft...", "info");
-            
-            const tokenEndpoint = `https://login.microsoftonline.com/${AUTH_TYPE}/oauth2/v2.0/token`;
-            const bodyParams = new URLSearchParams({
-                client_id: CLIENT_ID,
-                grant_type: 'authorization_code',
-                code: code,
-                redirect_uri: currentRedirectUri,
-                code_verifier: verifier
-            });
-
-            const tokenRes = await fetch(tokenEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: bodyParams.toString()
-            });
-
-            const tokenData = await tokenRes.json();
-
-            if (tokenData.access_token) {
-                const expiresIn = tokenData.expires_in || 3600;
-                localStorage.setItem('onedrive_access_token', tokenData.access_token);
-                localStorage.setItem('onedrive_token_expire', (Date.now() + expiresIn * 1000).toString());
-                localStorage.removeItem('onedrive_pkce_verifier');
-
-                window.history.replaceState({}, document.title, window.location.pathname);
-                showToast("Đăng nhập Microsoft thành công!", "success");
-
-                await loadUserProfile();
-                await loadOneDriveFiles();
-            } else {
-                throw new Error(tokenData.error_description || tokenData.error || "Không lấy được mã token");
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleUploadFiles(e.target.files);
+                fileInput.value = '';
             }
-        } catch (err) {
-            console.error("Token exchange error:", err);
-            showErrorBanner("Lỗi lấy mã đăng nhập", err.message);
-        }
-    }
-}
-
-// 2. Check if token already exists in LocalStorage
-async function checkSavedToken() {
-    const token = localStorage.getItem('onedrive_access_token');
-    const expire = localStorage.getItem('onedrive_token_expire');
-
-    if (token && expire && Date.now() < parseInt(expire, 10)) {
-        await loadUserProfile();
-        await loadOneDriveFiles();
-    } else {
-        renderAuthButtons();
-    }
-}
-
-function getValidToken() {
-    const token = localStorage.getItem('onedrive_access_token');
-    const expire = localStorage.getItem('onedrive_token_expire');
-    if (token && expire && Date.now() < parseInt(expire, 10)) {
-        return token;
-    }
-    return null;
-}
-
-// 3. Trigger Microsoft OAuth2 Login with PKCE
-async function loginMicrosoft() {
-    if (!CLIENT_ID) {
-        openConfigModal();
-        return;
-    }
-    hideErrorBanner();
-
-    const verifier = generateRandomString(64);
-    const challenge = await generateCodeChallenge(verifier);
-
-    localStorage.setItem('onedrive_pkce_verifier', verifier);
-
-    const scopes = encodeURIComponent("offline_access User.Read Files.ReadWrite");
-    const redirect = encodeURIComponent(currentRedirectUri);
-    
-    // Modern OAuth2 PKCE Authorization Request
-    const authUrl = `https://login.microsoftonline.com/${AUTH_TYPE}/oauth2/v2.0/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${redirect}&response_mode=query&scope=${scopes}&code_challenge=${challenge}&code_challenge_method=S256&prompt=select_account`;
-
-    window.location.href = authUrl;
-}
-
-// 4. Logout
-function logoutMicrosoft() {
-    localStorage.removeItem('onedrive_access_token');
-    localStorage.removeItem('onedrive_token_expire');
-    localStorage.removeItem('onedrive_pkce_verifier');
-    currentAccount = null;
-    oneDriveFiles = [];
-    renderAuthButtons();
-    filterAndRenderFiles();
-    showToast("Đã đăng xuất tài khoản", "info");
-}
-
-// 5. Load User Profile from Microsoft Graph
-async function loadUserProfile() {
-    const token = getValidToken();
-    if (!token) return;
-
-    try {
-        const res = await fetch('https://graph.microsoft.com/v1.0/me', {
-            headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (res.ok) {
-            currentAccount = await res.json();
-            renderAuthButtons();
-        } else {
-            logoutMicrosoft();
-        }
-    } catch (e) {
-        console.error("Profile error:", e);
+
+        ['dragenter', 'dragover'].forEach(ev => {
+            dropZone.addEventListener(ev, (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(ev => {
+            dropZone.addEventListener(ev, (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+            });
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                handleUploadFiles(e.dataTransfer.files);
+            }
+        });
     }
+
+    // Category Tabs
+    const categoryTabs = document.getElementById('category-tabs');
+    if (categoryTabs) {
+        categoryTabs.addEventListener('click', (e) => {
+            const btn = e.target.closest('.cat-btn');
+            if (!btn) return;
+            document.querySelectorAll('.cat-btn').forEach(b => {
+                b.classList.remove('active-segment');
+                b.classList.add('inactive-segment');
+            });
+            btn.classList.add('active-segment');
+            btn.classList.remove('inactive-segment');
+            currentCategory = btn.dataset.cat;
+            filterAndRenderFiles();
+        });
+    }
+
+    // Search input
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            currentSearch = e.target.value.trim().toLowerCase();
+            filterAndRenderFiles();
+        });
+    }
+
+    // Modal background close
+    const modalEl = document.getElementById('preview-modal');
+    if (modalEl) {
+        modalEl.addEventListener('click', (e) => {
+            if (e.target.id === 'preview-modal') {
+                closePreviewModal();
+            }
+        });
+    }
+
+    renderHeaderStatus();
 }
 
-function renderAuthButtons() {
+function renderHeaderStatus() {
     const container = document.getElementById('auth-actions');
-    if (currentAccount) {
+    if (container) {
         container.innerHTML = `
-            <div class="flex items-center space-x-2">
-                <span class="text-xs font-semibold text-[#0078D4] bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200 truncate max-w-[140px] sm:max-w-xs">
-                    <i class="fa-solid fa-user-check mr-1"></i> ${currentAccount.displayName || currentAccount.userPrincipalName}
-                </span>
-                <button onclick="logoutMicrosoft()" class="px-3 py-1.5 rounded-full text-xs font-semibold text-[#FF3B30] bg-red-50 hover:bg-red-100 transition-all">
-                    Đăng xuất
-                </button>
-            </div>
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm">
+                <span class="w-2 h-2 mr-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                OneDrive Cloud Online
+            </span>
         `;
-        document.getElementById('dropzone-title').innerText = "Tải Tệp Lên OneDrive Của Bạn";
-        document.getElementById('dropzone-desc').innerHTML = `Tài khoản: <strong>${currentAccount.userPrincipalName || currentAccount.mail}</strong> &bull; Thư mục <strong>/Apps/OneDriveDrop</strong>`;
-        hideErrorBanner();
-    } else {
-        container.innerHTML = `
-            <button onclick="loginMicrosoft()" class="px-3.5 py-1.5 rounded-full text-xs font-semibold text-white bg-[#0078D4] hover:bg-[#0069BA] shadow-sm flex items-center space-x-1.5 active:scale-95 transition-all">
-                <i class="fa-brands fa-microsoft"></i>
-                <span>Đăng nhập OneDrive</span>
-            </button>
-        `;
-        document.getElementById('dropzone-title').innerText = "Đăng Nhập Microsoft Để Tải Lên";
     }
 }
 
-// 6. Upload File directly to OneDrive via Microsoft Graph API
+// 1. Upload File directly via Cloudflare Worker Gateway
 async function handleUploadFiles(files) {
-    const token = getValidToken();
-    if (!token) {
-        loginMicrosoft();
-        return;
-    }
-
     const queue = document.getElementById('upload-queue');
     const queueItems = document.getElementById('queue-items');
-    queue.classList.remove('hidden');
+    if (queue) queue.classList.remove('hidden');
 
     for (let file of files) {
         const queueId = 'q-' + Math.random().toString(36).substr(2, 9);
         const itemEl = document.createElement('div');
         itemEl.id = queueId;
-        itemEl.className = 'bg-[#F2F2F7] rounded-[14px] p-3 flex items-center justify-between text-xs';
+        itemEl.className = 'bg-[#F2F2F7] rounded-[14px] p-3 flex items-center justify-between text-xs transition-all';
         itemEl.innerHTML = `
             <div class="truncate pr-2">
-                <span class="font-medium text-black truncate">${file.name}</span>
+                <span class="font-medium text-black truncate">${escapeHtml(file.name)}</span>
                 <span class="text-[#8E8E93] text-[10px]"> (${formatBytes(file.size)})</span>
             </div>
-            <span class="status font-semibold text-[#0078D4]"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải...</span>
+            <span class="status font-semibold text-[#0078D4]"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên OneDrive...</span>
         `;
-        queueItems.prepend(itemEl);
+        if (queueItems) queueItems.prepend(itemEl);
 
         try {
-            const endpoint = `https://graph.microsoft.com/v1.0/me/drive/special/approot:/${encodeURIComponent(file.name)}:/content`;
-            
-            const uploadRes = await fetch(endpoint, {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': file.type || 'application/octet-stream'
-                },
-                body: file
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const uploadRes = await fetch(`${WORKER_URL}/upload`, {
+                method: 'POST',
+                body: formData
             });
 
-            if (uploadRes.ok) {
+            const resData = await uploadRes.json();
+
+            if (uploadRes.ok && resData.success) {
+                itemEl.className = 'bg-emerald-50 rounded-[14px] p-3 flex items-center justify-between text-xs transition-all';
                 itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-check text-emerald-600"></i> Thành công';
                 showToast(`Đã tải lên "${file.name}" vào OneDrive!`, 'success');
                 setTimeout(() => { itemEl.remove(); }, 3000);
             } else {
-                const errData = await uploadRes.json();
-                throw new Error(errData.error?.message || 'Tải lên thất bại');
+                throw new Error(resData.message || 'Lỗi tải lên máy chủ');
             }
         } catch (err) {
             console.error("Upload error:", err);
+            itemEl.className = 'bg-red-50 rounded-[14px] p-3 flex items-center justify-between text-xs transition-all';
             itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-xmark text-red-500"></i> Lỗi';
             showToast(`Lỗi khi tải "${file.name}": ` + err.message, 'error');
         }
@@ -266,18 +154,14 @@ async function handleUploadFiles(files) {
     await loadOneDriveFiles();
 }
 
-// 7. Load Files from OneDrive
+// 2. Load Files from OneDrive via Cloudflare Gateway
 async function loadOneDriveFiles() {
-    const token = getValidToken();
-    if (!token) return;
-
     try {
-        const res = await fetch('https://graph.microsoft.com/v1.0/me/drive/special/approot/children?$top=100&$expand=thumbnails', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch(`${WORKER_URL}/files`);
         if (res.ok) {
             const data = await res.json();
-            oneDriveFiles = data.value || [];
+            oneDriveFiles = data.files || [];
+            updateStats(oneDriveFiles);
             filterAndRenderFiles();
         }
     } catch (err) {
@@ -285,12 +169,35 @@ async function loadOneDriveFiles() {
     }
 }
 
+function updateStats(files) {
+    let imgCount = 0;
+    let docCount = 0;
+    let medCount = 0;
+
+    files.forEach(f => {
+        const ext = (f.name.split('.').pop() || '').toLowerCase();
+        const cat = getCategory(ext);
+        if (cat === 'image') imgCount++;
+        else if (cat === 'document') docCount++;
+        else if (cat === 'media') medCount++;
+    });
+
+    const cAll = document.getElementById('count-all');
+    const cImg = document.getElementById('count-image');
+    const cDoc = document.getElementById('count-document');
+    const cMed = document.getElementById('count-media');
+
+    if (cAll) cAll.innerText = files.length;
+    if (cImg) cImg.innerText = imgCount;
+    if (cDoc) cDoc.innerText = docCount;
+    if (cMed) cMed.innerText = medCount;
+}
+
 function filterAndRenderFiles() {
     const grid = document.getElementById('files-grid');
     const empty = document.getElementById('empty-state');
 
     let list = oneDriveFiles.filter(item => {
-        if (item.folder) return false;
         const ext = (item.name.split('.').pop() || '').toLowerCase();
         const cat = getCategory(ext);
 
@@ -300,41 +207,43 @@ function filterAndRenderFiles() {
     });
 
     if (!list.length) {
-        grid.innerHTML = '';
-        empty.classList.remove('hidden');
+        if (grid) grid.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
         return;
     }
 
-    empty.classList.add('hidden');
-    grid.innerHTML = list.map(f => {
-        const ext = (f.name.split('.').pop() || '').toLowerCase();
-        const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext);
-        const thumb = f.thumbnails && f.thumbnails[0] ? f.thumbnails[0].medium.url : '';
-        const downloadUrl = f['@microsoft.graph.downloadUrl'] || f.webUrl;
+    if (empty) empty.classList.add('hidden');
+    if (grid) {
+        grid.innerHTML = list.map(f => {
+            const ext = (f.name.split('.').pop() || '').toLowerCase();
+            const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext);
+            const thumb = f.thumbnail;
+            const downloadUrl = f.download_url || f.web_url;
 
-        return `
-            <div class="ios-file-card bg-white rounded-[20px] border border-[rgba(60,60,67,0.08)] overflow-hidden shadow-sm flex flex-col cursor-pointer" onclick="openFilePreview('${f.id}')">
-                <div class="h-32 bg-[#F2F2F7] flex items-center justify-center relative overflow-hidden">
-                    ${isImg && thumb 
-                        ? `<img src="${thumb}" class="w-full h-full object-cover">` 
-                        : `<div class="text-4xl text-[#0078D4]">${getFileIcon(ext)}</div>`
-                    }
-                    <span class="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-black/60 text-white backdrop-blur-md">
-                        ${ext}
-                    </span>
-                </div>
-                <div class="p-3 flex-1 flex flex-col justify-between">
-                    <h4 class="text-xs font-semibold text-black truncate" title="${f.name}">${f.name}</h4>
-                    <div class="flex items-center justify-between text-[11px] text-[#8E8E93] mt-1">
-                        <span>${formatBytes(f.size)}</span>
-                        <button onclick="event.stopPropagation(); copyLink('${downloadUrl}')" class="text-[#0078D4] font-semibold flex items-center">
-                            <i class="fa-solid fa-link text-[10px] mr-1"></i> Chép Link
-                        </button>
+            return `
+                <div class="ios-file-card bg-white rounded-[20px] border border-[rgba(60,60,67,0.08)] overflow-hidden shadow-sm flex flex-col cursor-pointer" onclick="openFilePreview('${f.id}')">
+                    <div class="h-32 bg-[#F2F2F7] flex items-center justify-center relative overflow-hidden">
+                        ${isImg && thumb 
+                            ? `<img src="${thumb}" class="w-full h-full object-cover">` 
+                            : `<div class="text-4xl text-[#0078D4]">${getFileIcon(ext)}</div>`
+                        }
+                        <span class="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-black/60 text-white backdrop-blur-md">
+                            ${ext}
+                        </span>
+                    </div>
+                    <div class="p-3 flex-1 flex flex-col justify-between">
+                        <h4 class="text-xs font-semibold text-black truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</h4>
+                        <div class="flex items-center justify-between text-[11px] text-[#8E8E93] mt-1">
+                            <span>${formatBytes(f.size)}</span>
+                            <button onclick="event.stopPropagation(); copyLink('${downloadUrl}')" class="text-[#0078D4] font-semibold flex items-center">
+                                <i class="fa-solid fa-link text-[10px] mr-1"></i> Chép Link
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
-        `;
-    }).join('');
+            `;
+        }).join('');
+    }
 }
 
 function openFilePreview(fileId) {
@@ -342,13 +251,13 @@ function openFilePreview(fileId) {
     if (!f) return;
 
     currentPreviewFile = f;
-    const downloadUrl = f['@microsoft.graph.downloadUrl'] || f.webUrl;
+    const downloadUrl = f.download_url || f.web_url;
 
     document.getElementById('modal-file-name').innerText = f.name;
     document.getElementById('modal-file-size').innerText = formatBytes(f.size);
-    document.getElementById('modal-file-date').innerText = new Date(f.createdDateTime).toLocaleDateString('vi-VN');
+    document.getElementById('modal-file-date').innerText = new Date(f.created_at).toLocaleDateString('vi-VN');
     document.getElementById('modal-direct-link').value = downloadUrl;
-    document.getElementById('modal-download-btn').href = f.webUrl;
+    document.getElementById('modal-download-btn').href = f.web_url;
 
     const previewBox = document.getElementById('modal-preview-container');
     const ext = (f.name.split('.').pop() || '').toLowerCase();
@@ -359,7 +268,7 @@ function openFilePreview(fileId) {
         previewBox.innerHTML = `
             <div class="p-6 text-center text-white space-y-2">
                 <div class="text-5xl text-[#0078D4] mb-1">${getFileIcon(ext)}</div>
-                <div class="text-xs font-semibold">${f.name}</div>
+                <div class="text-xs font-semibold">${escapeHtml(f.name)}</div>
             </div>
         `;
     }
@@ -367,11 +276,11 @@ function openFilePreview(fileId) {
     // Delete Button
     document.getElementById('modal-delete-btn').onclick = async () => {
         if (confirm(`Xóa tệp "${f.name}" khỏi OneDrive?`)) {
-            const token = getValidToken();
             try {
-                const res = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${f.id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${token}` }
+                const res = await fetch(`${WORKER_URL}/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: f.id })
                 });
                 if (res.ok) {
                     showToast("Đã xóa tệp thành công!", "success");
@@ -413,117 +322,12 @@ function copyToClipboard(inputId, btn) {
 
 function shareNativeFile() {
     if (!currentPreviewFile) return;
-    const url = currentPreviewFile['@microsoft.graph.downloadUrl'] || currentPreviewFile.webUrl;
+    const url = currentPreviewFile.download_url || currentPreviewFile.web_url;
     if (navigator.share) {
         navigator.share({ title: currentPreviewFile.name, url: url });
     } else {
         copyLink(url);
     }
-}
-
-// Config Modal
-function openConfigModal() {
-    document.getElementById('config-client-id').value = CLIENT_ID;
-    document.getElementById('config-authority-type').value = AUTH_TYPE;
-    document.getElementById('config-modal').classList.remove('hidden');
-}
-
-function closeConfigModal() {
-    document.getElementById('config-modal').classList.add('hidden');
-}
-
-function saveClientId() {
-    const id = document.getElementById('config-client-id').value.trim();
-    const authType = document.getElementById('config-authority-type').value;
-    if (!id) return;
-    localStorage.setItem('onedrive_client_id', id);
-    localStorage.setItem('onedrive_auth_type', authType);
-    CLIENT_ID = id;
-    AUTH_TYPE = authType;
-    closeConfigModal();
-    location.reload();
-}
-
-function showErrorBanner(title, msg) {
-    const banner = document.getElementById('error-banner');
-    const titleEl = document.getElementById('error-banner-title');
-    const descEl = document.getElementById('error-banner-desc');
-    if (banner && titleEl && descEl) {
-        titleEl.innerText = title;
-        descEl.innerText = msg;
-        banner.classList.remove('hidden');
-    }
-}
-
-function hideErrorBanner() {
-    const banner = document.getElementById('error-banner');
-    if (banner) banner.classList.add('hidden');
-}
-
-function initUI() {
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-
-    dropZone.addEventListener('click', () => {
-        if (!getValidToken()) {
-            loginMicrosoft();
-            return;
-        }
-        fileInput.click();
-    });
-
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length) {
-            handleUploadFiles(e.target.files);
-            fileInput.value = '';
-        }
-    });
-
-    ['dragenter', 'dragover'].forEach(ev => {
-        dropZone.addEventListener(ev, (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        });
-    });
-
-    ['dragleave', 'drop'].forEach(ev => {
-        dropZone.addEventListener(ev, (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-        });
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        if (e.dataTransfer.files.length) {
-            if (!getValidToken()) {
-                loginMicrosoft();
-                return;
-            }
-            handleUploadFiles(e.dataTransfer.files);
-        }
-    });
-
-    // Category Tabs
-    document.getElementById('category-tabs').addEventListener('click', (e) => {
-        const btn = e.target.closest('.cat-btn');
-        if (!btn) return;
-        document.querySelectorAll('.cat-btn').forEach(b => {
-            b.classList.remove('active-segment');
-            b.classList.add('inactive-segment');
-        });
-        btn.classList.add('active-segment');
-        btn.classList.remove('inactive-segment');
-        currentCategory = btn.dataset.cat;
-        filterAndRenderFiles();
-    });
-
-    // Search input
-    document.getElementById('search-input').addEventListener('input', (e) => {
-        currentSearch = e.target.value.trim().toLowerCase();
-        filterAndRenderFiles();
-    });
 }
 
 // Helpers
@@ -549,6 +353,11 @@ function getFileIcon(ext) {
     return map[ext] || '<i class="fa-solid fa-file text-[#0078D4]"></i>';
 }
 
+function escapeHtml(text) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
 function formatBytes(bytes) {
     if (!+bytes) return '0 B';
     const k = 1024, sizes = ['B','KB','MB','GB','TB'];
@@ -561,6 +370,6 @@ function showToast(msg, type='info') {
     const t = document.createElement('div');
     t.className = `bg-white/95 backdrop-blur-xl text-black px-4 py-2.5 rounded-full shadow-lg border border-gray-200 text-xs font-semibold flex items-center space-x-2`;
     t.innerHTML = `<span>${msg}</span>`;
-    c.appendChild(t);
+    if (c) c.appendChild(t);
     setTimeout(() => t.remove(), 3500);
 }
