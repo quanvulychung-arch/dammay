@@ -1,6 +1,6 @@
 /**
- * CloudDrop OneDrive - Pure Native OAuth2 Engine (Zero External Library Required)
- * 100% Guaranteed to run without CDN / MSAL errors on GitHub Pages & iPhone
+ * CloudDrop OneDrive - Native OAuth2 PKCE Engine (Official Microsoft Standard for SPA)
+ * 100% Works without requiring Implicit Grant checkboxes
  */
 
 // Configuration
@@ -16,42 +16,93 @@ let currentCategory = 'all';
 let currentSearch = '';
 let currentPreviewFile = null;
 
+// PKCE Helper Functions (Native Web Crypto API)
+function generateRandomString(length = 64) {
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    let result = '';
+    const values = new Uint32Array(length);
+    crypto.getRandomValues(values);
+    for (let i = 0; i < length; i++) {
+        result += charset[values[i] % charset.length];
+    }
+    return result;
+}
+
+async function generateCodeChallenge(verifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     initUI();
-    handleOAuthCallback();
-    checkSavedToken();
+    await handleOAuthCallback();
+    await checkSavedToken();
 });
 
-// 1. Check OAuth Token returned in URL Hash
+// 1. Handle OAuth Code / Token in URL Query or Hash
 async function handleOAuthCallback() {
-    if (window.location.hash) {
-        const hash = window.location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        
-        const accessToken = params.get('access_token');
-        const error = params.get('error');
-        const errorDesc = params.get('error_description');
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const error = urlParams.get('error');
+    const errorDesc = urlParams.get('error_description');
 
-        if (error) {
-            showErrorBanner("Lỗi từ Microsoft", decodeURIComponent(errorDesc || error));
-            window.location.hash = '';
+    if (error) {
+        showErrorBanner("Lỗi từ Microsoft", decodeURIComponent(errorDesc || error));
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+    }
+
+    // Exchange Auth Code for Access Token via PKCE
+    if (code) {
+        const verifier = localStorage.getItem('onedrive_pkce_verifier');
+        if (!verifier) {
+            showErrorBanner("Lỗi PKCE", "Không tìm thấy mã xác thực phiên. Vui lòng bấm đăng nhập lại.");
             return;
         }
 
-        if (accessToken) {
-            const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
-            const expireTime = Date.now() + (expiresIn * 1000);
+        try {
+            showToast("Đang xác thực tài khoản Microsoft...", "info");
             
-            localStorage.setItem('onedrive_access_token', accessToken);
-            localStorage.setItem('onedrive_token_expire', expireTime.toString());
-            
-            // Clean hash from URL for clean interface
-            window.history.replaceState({}, document.title, window.location.pathname);
-            
-            showToast("Đăng nhập Microsoft thành công!", "success");
-            await loadUserProfile();
-            await loadOneDriveFiles();
+            const tokenEndpoint = `https://login.microsoftonline.com/${AUTH_TYPE}/oauth2/v2.0/token`;
+            const bodyParams = new URLSearchParams({
+                client_id: CLIENT_ID,
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: currentRedirectUri,
+                code_verifier: verifier
+            });
+
+            const tokenRes = await fetch(tokenEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: bodyParams.toString()
+            });
+
+            const tokenData = await tokenRes.json();
+
+            if (tokenData.access_token) {
+                const expiresIn = tokenData.expires_in || 3600;
+                localStorage.setItem('onedrive_access_token', tokenData.access_token);
+                localStorage.setItem('onedrive_token_expire', (Date.now() + expiresIn * 1000).toString());
+                localStorage.removeItem('onedrive_pkce_verifier');
+
+                window.history.replaceState({}, document.title, window.location.pathname);
+                showToast("Đăng nhập Microsoft thành công!", "success");
+
+                await loadUserProfile();
+                await loadOneDriveFiles();
+            } else {
+                throw new Error(tokenData.error_description || tokenData.error || "Không lấy được mã token");
+            }
+        } catch (err) {
+            console.error("Token exchange error:", err);
+            showErrorBanner("Lỗi lấy mã đăng nhập", err.message);
         }
     }
 }
@@ -78,19 +129,25 @@ function getValidToken() {
     return null;
 }
 
-// 3. Trigger Pure Microsoft OAuth2 Login
-function loginMicrosoft() {
+// 3. Trigger Microsoft OAuth2 Login with PKCE
+async function loginMicrosoft() {
     if (!CLIENT_ID) {
         openConfigModal();
         return;
     }
     hideErrorBanner();
 
-    const scope = encodeURIComponent("https://graph.microsoft.com/User.Read https://graph.microsoft.com/Files.ReadWrite");
-    const redirect = encodeURIComponent(currentRedirectUri);
-    const authUrl = `https://login.microsoftonline.com/${AUTH_TYPE}/oauth2/v2.0/authorize?client_id=${CLIENT_ID}&response_type=token&redirect_uri=${redirect}&scope=${scope}&response_mode=fragment&state=onedrive_drop`;
+    const verifier = generateRandomString(64);
+    const challenge = await generateCodeChallenge(verifier);
 
-    // Redirect to Microsoft Login Page
+    localStorage.setItem('onedrive_pkce_verifier', verifier);
+
+    const scopes = encodeURIComponent("offline_access User.Read Files.ReadWrite");
+    const redirect = encodeURIComponent(currentRedirectUri);
+    
+    // Modern OAuth2 PKCE Authorization Request
+    const authUrl = `https://login.microsoftonline.com/${AUTH_TYPE}/oauth2/v2.0/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${redirect}&response_mode=query&scope=${scopes}&code_challenge=${challenge}&code_challenge_method=S256&prompt=select_account`;
+
     window.location.href = authUrl;
 }
 
@@ -98,6 +155,7 @@ function loginMicrosoft() {
 function logoutMicrosoft() {
     localStorage.removeItem('onedrive_access_token');
     localStorage.removeItem('onedrive_token_expire');
+    localStorage.removeItem('onedrive_pkce_verifier');
     currentAccount = null;
     oneDriveFiles = [];
     renderAuthButtons();
