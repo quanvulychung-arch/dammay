@@ -1,0 +1,57 @@
+/* iOS Native Styling for OneDrive GitHub Pages */
+:root {
+    --ios-blue: #007AFF;
+    --onedrive-blue: #0078D4;
+}
+
+.ios-navbar {
+    padding-top: env(safe-area-inset-top);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+}
+
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.active-segment {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.inactive-segment {
+    color: #8E8E93;
+}
+
+.ios-file-card {
+    transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.2s ease;
+}
+
+.ios-file-card:active {
+    transform: scale(0.97);
+}
+
+@media (min-width: 640px) {
+    .ios-file-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+    }
+}
+
+.dragover {
+    border-color: #0078D4 !important;
+    background-color: rgba(0, 120, 212, 0.08) !important;
+    transform: scale(1.01);
+}
+
+@media (max-width: 639px) {
+    #preview-modal > div {
+        animation: slideUp 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}

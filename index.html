@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- iOS / Apple Web App Capabilities -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="OneDriveDrop">
+    <meta name="theme-color" content="#F2F2F7">
+    <link rel="manifest" href="manifest.json">
+    
+    <title>OneDrive CloudDrop - Quản Lý Tệp GitHub & OneDrive</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        iosBlue: '#007AFF',
+                        iosGreen: '#34C759',
+                        iosIndigo: '#5856D6',
+                        iosRed: '#FF3B30',
+                        iosBg: '#F2F2F7',
+                        iosCard: '#FFFFFF',
+                        oneDriveBlue: '#0078D4'
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'Segoe UI', 'Roboto', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Microsoft MSAL.js for OAuth2 (OneDrive API) -->
+    <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+    <!-- Microsoft Graph JavaScript SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/microsoft-graph-client/lib/graph-js-sdk.js"></script>
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-[#F2F2F7] text-[#1C1C1E] min-h-screen flex flex-col font-sans antialiased">
+
+    <!-- iOS Top Navigation -->
+    <header class="ios-navbar sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-[rgba(60,60,67,0.12)]">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+            
+            <!-- Left Logo -->
+            <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#0078D4] to-[#00B4FF] flex items-center justify-center text-white shadow-sm shadow-sky-500/30">
+                    <i class="fa-brands fa-microsoft text-sm"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base leading-none text-[#000000] tracking-tight">
+                        OneDrive Drop
+                    </h1>
+                    <span class="text-[10px] text-[#8E8E93] font-medium">GitHub Pages &bull; OneDrive API</span>
+                </div>
+            </div>
+
+            <!-- Right Controls: Microsoft Auth / Settings -->
+            <div class="flex items-center space-x-2" id="auth-header-controls">
+                <button id="btn-config" onclick="openConfigModal()" class="w-8 h-8 rounded-full bg-[#E5E5EA] text-[#3C3C43] flex items-center justify-center hover:bg-[#D1D1D6] transition-all" title="Cài đặt App ID">
+                    <i class="fa-solid fa-gear text-xs"></i>
+                </button>
+                <div id="auth-actions">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main App Container -->
+    <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-5 space-y-5 pb-24 sm:pb-12">
+        
+        <!-- Setup Notice Banner (If Client ID missing) -->
+        <div id="setup-banner" class="hidden bg-gradient-to-r from-amber-500 to-orange-500 rounded-[22px] p-4 text-white shadow-md flex items-center justify-between gap-3 text-xs">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-triangle-exclamation text-xl flex-shrink-0"></i>
+                <div>
+                    <strong>Chưa cấu hình Microsoft Client ID:</strong> Vui lòng bấm vào bánh răng cài đặt để nhập Client ID của bạn.
+                </div>
+            </div>
+            <button onclick="openConfigModal()" class="px-3 py-1.5 bg-white text-orange-600 font-bold rounded-full whitespace-nowrap shadow-sm">
+                Cài Đặt Ngay
+            </button>
+        </div>
+
+        <!-- Upload Zone (Authenticated Admin) -->
+        <div id="upload-card" class="bg-white rounded-[24px] p-5 sm:p-6 border border-[rgba(60,60,67,0.08)] shadow-sm relative overflow-hidden">
+            <div id="drop-zone" class="border-2 border-dashed border-[#0078D4]/30 hover:border-[#0078D4] hover:bg-sky-50/40 rounded-[20px] p-6 sm:p-8 text-center transition-all cursor-pointer group relative">
+                <input type="file" id="file-input" multiple class="hidden">
+                
+                <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-sky-50 text-[#0078D4] flex items-center justify-center text-2xl group-hover:scale-105 group-hover:bg-[#0078D4] group-hover:text-white transition-all duration-300 shadow-sm">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                </div>
+                
+                <h3 class="text-base sm:text-lg font-bold text-[#000000] mb-0.5" id="dropzone-title">
+                    Tải Tệp Lên OneDrive
+                </h3>
+                <p class="text-xs text-[#8E8E93] mb-4" id="dropzone-desc">
+                    Tệp được upload trực tiếp vào thư mục <strong>/Apps/OneDriveDrop</strong> trên tài khoản Microsoft của bạn
+                </p>
+                
+                <button type="button" class="inline-flex items-center px-4 py-2 rounded-full bg-[#0078D4] hover:bg-[#0069BA] text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition-all">
+                    <i class="fa-solid fa-plus mr-1.5"></i> Chọn tệp từ iPhone / PC
+                </button>
+            </div>
+
+            <!-- Upload Queue -->
+            <div id="upload-queue" class="mt-4 space-y-2 hidden">
+                <div class="flex items-center justify-between pb-1.5 border-b border-[rgba(60,60,67,0.06)]">
+                    <h4 class="text-xs font-semibold text-[#3C3C43] flex items-center">
+                        <i class="fa-solid fa-circle-notch fa-spin text-[#0078D4] mr-1.5"></i> 
+                        Đang tải lên OneDrive (<span id="queue-count">0</span>)
+                    </h4>
+                </div>
+                <div id="queue-items" class="space-y-2 max-h-48 overflow-y-auto pr-1"></div>
+            </div>
+        </div>
+
+        <!-- Filter & Search Controls -->
+        <div class="space-y-3">
+            <!-- iOS Segmented Category Tabs -->
+            <div class="ios-segmented-control bg-[#E5E5EA] p-1 rounded-[14px] flex items-center overflow-x-auto scrollbar-none" id="category-tabs">
+                <button data-cat="all" class="cat-btn active-segment flex-1 py-1.5 px-3 rounded-[11px] text-xs font-semibold whitespace-nowrap transition-all text-center">
+                    Tất cả (<span id="count-all">0</span>)
+                </button>
+                <button data-cat="image" class="cat-btn inactive-segment flex-1 py-1.5 px-3 rounded-[11px] text-xs font-semibold whitespace-nowrap transition-all text-center text-[#8E8E93]">
+                    <i class="fa-solid fa-image mr-1"></i> Ảnh (<span id="count-image">0</span>)
+                </button>
+                <button data-cat="document" class="cat-btn inactive-segment flex-1 py-1.5 px-3 rounded-[11px] text-xs font-semibold whitespace-nowrap transition-all text-center text-[#8E8E93]">
+                    <i class="fa-solid fa-file-lines mr-1"></i> Tài liệu (<span id="count-document">0</span>)
+                </button>
+                <button data-cat="media" class="cat-btn inactive-segment flex-1 py-1.5 px-3 rounded-[11px] text-xs font-semibold whitespace-nowrap transition-all text-center text-[#8E8E93]">
+                    <i class="fa-solid fa-play mr-1"></i> Media (<span id="count-media">0</span>)
+                </button>
+            </div>
+
+            <!-- Search & Refresh Bar -->
+            <div class="flex items-center gap-2">
+                <div class="relative flex-1">
+                    <input type="text" id="search-input" placeholder="Tìm tệp trên OneDrive..." 
+                        class="w-full pl-8 pr-3 py-2 bg-[#E5E5EA]/70 focus:bg-white border border-transparent focus:border-[rgba(60,60,67,0.15)] rounded-[14px] text-xs text-[#000000] outline-none transition-all placeholder-[#8E8E93]">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-[#8E8E93] text-xs"></i>
+                </div>
+
+                <button onclick="loadOneDriveFiles()" class="px-3 py-2 bg-[#E5E5EA] text-[#3C3C43] hover:text-black rounded-[14px] text-xs font-semibold transition-all flex items-center space-x-1" title="Làm mới">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+
+            <!-- Files Grid View -->
+            <div id="files-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+
+            <!-- Empty State -->
+            <div id="empty-state" class="hidden bg-white rounded-[24px] border border-[rgba(60,60,67,0.08)] p-10 text-center">
+                <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-[#F2F2F7] text-[#8E8E93] flex items-center justify-center text-2xl">
+                    <i class="fa-brands fa-microsoft"></i>
+                </div>
+                <h4 class="text-sm font-bold text-[#000000]">Chưa có tệp nào trên OneDrive</h4>
+                <p class="text-xs text-[#8E8E93] mt-1">Đăng nhập tài khoản Microsoft và tải tệp lên</p>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- File Detail & Share Bottom Sheet Modal -->
+    <div id="preview-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="bg-white rounded-t-[28px] sm:rounded-[28px] max-w-lg w-full shadow-2xl overflow-hidden border border-[rgba(60,60,67,0.08)] transform transition-all max-h-[90vh] flex flex-col">
+            <div class="w-12 h-1.5 bg-[#D1D1D6] rounded-full mx-auto mt-2.5 sm:hidden"></div>
+
+            <div class="flex items-center justify-between p-4 px-5 border-b border-[rgba(60,60,67,0.08)]">
+                <div class="flex items-center space-x-2 truncate">
+                    <div id="modal-file-icon" class="text-[#0078D4] text-lg"></div>
+                    <h3 id="modal-file-name" class="font-bold text-[#000000] text-sm sm:text-base truncate">Chi tiết tệp</h3>
+                </div>
+                <button onclick="closePreviewModal()" class="w-7 h-7 bg-[#E5E5EA] text-[#8E8E93] hover:text-[#000000] rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+
+            <div class="p-5 space-y-4 overflow-y-auto flex-1">
+                <div id="modal-preview-container" class="w-full bg-[#1C1C1E] rounded-[20px] flex items-center justify-center min-h-[160px] max-h-[260px] overflow-hidden"></div>
+
+                <div class="grid grid-cols-2 gap-2 bg-[#F2F2F7] p-3 rounded-[16px] text-[11px]">
+                    <div>
+                        <span class="text-[#8E8E93] block font-medium">Dung lượng</span>
+                        <span id="modal-file-size" class="font-semibold text-[#000000]">0 B</span>
+                    </div>
+                    <div>
+                        <span class="text-[#8E8E93] block font-medium">Ngày tải lên</span>
+                        <span id="modal-file-date" class="font-semibold text-[#000000]">--</span>
+                    </div>
+                </div>
+
+                <!-- 1-Click Copy OneDrive Direct / Web Link -->
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-[#000000] flex items-center justify-between">
+                        <span><i class="fa-solid fa-link text-[#0078D4] mr-1.5"></i> Link OneDrive Chia Sẻ:</span>
+                    </label>
+                    <div class="flex items-center space-x-2">
+                        <input type="text" id="modal-direct-link" readonly 
+                            class="flex-1 bg-[#F2F2F7] border border-[rgba(60,60,67,0.12)] rounded-[14px] px-3 py-2 text-xs text-[#000000] font-mono outline-none">
+                        <button onclick="copyToClipboard('modal-direct-link', this)" 
+                            class="px-4 py-2 bg-[#0078D4] active:scale-95 text-white text-xs font-bold rounded-[14px] transition-all flex items-center space-x-1 shadow-sm">
+                            <i class="fa-regular fa-copy"></i>
+                            <span>Chép Link</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="shareNativeFile()" class="h-11 rounded-[14px] bg-[#5856D6] text-white font-semibold text-xs flex items-center justify-center space-x-1.5 shadow-sm">
+                        <i class="fa-solid fa-arrow-up-from-bracket"></i>
+                        <span>Chia sẻ iPhone</span>
+                    </button>
+                    <a id="modal-download-btn" href="#" target="_blank" class="h-11 rounded-[14px] bg-[#E5E5EA] text-[#000000] font-semibold text-xs flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                        <span>Mở OneDrive</span>
+                    </a>
+                </div>
+
+                <!-- QR Code -->
+                <div class="p-3 bg-[#F2F2F7] rounded-[18px] flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div id="qrcode-box" class="p-1.5 bg-white rounded-xl border border-[rgba(60,60,67,0.12)] shadow-sm"></div>
+                        <div>
+                            <div class="text-xs font-bold text-[#000000]">Quét Mã QR</div>
+                            <div class="text-[10px] text-[#8E8E93]">Mở nhanh tệp trên điện thoại</div>
+                        </div>
+                    </div>
+                    <button id="modal-delete-btn" class="px-3 py-1.5 rounded-[12px] bg-red-50 text-[#FF3B30] text-xs font-semibold hover:bg-red-100 transition-all">
+                        <i class="fa-regular fa-trash-can mr-1"></i> Xóa
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Config Modal (For Microsoft Azure Client ID) -->
+    <div id="config-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-[24px] max-w-sm w-full p-5 space-y-4 shadow-2xl border border-[rgba(60,60,67,0.08)]">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-black">Cấu Hình Microsoft App ID</h3>
+                <button onclick="closeConfigModal()" class="text-gray-400 hover:text-black"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-xs text-[#8E8E93]">Nhập Client ID từ Microsoft Azure App Registration để cấp quyền upload lên OneDrive của bạn trên GitHub Pages.</p>
+            
+            <div>
+                <label class="text-xs font-semibold text-gray-700 block mb-1">Application (Client) ID:</label>
+                <input type="text" id="config-client-id" placeholder="vd: 5a8e1234-xxxx-xxxx-xxxx-xxxxxxxxxxxx" 
+                    class="w-full px-3 py-2 bg-[#F2F2F7] border border-gray-200 rounded-[12px] text-xs font-mono outline-none focus:border-[#0078D4]">
+            </div>
+
+            <button onclick="saveClientId()" class="w-full py-2.5 bg-[#0078D4] text-white text-xs font-bold rounded-[12px] shadow-sm">
+                Lưu Cấu Hình
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 flex flex-col space-y-2 pointer-events-none w-11/12 max-w-sm"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

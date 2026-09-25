@@ -1,0 +1,10 @@
+{
+  "name": "OneDriveDrop Pro",
+  "short_name": "OneDriveDrop",
+  "description": "Quản lý & Tải Lên Tệp OneDrive",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F2F2F7",
+  "theme_color": "#0078D4"
+}
