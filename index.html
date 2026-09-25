@@ -11,7 +11,7 @@
     <meta name="theme-color" content="#0F172A">
     <link rel="manifest" href="manifest.json">
     
-    <title>CloudVault Pro - Lưu Trữ & Chia Sẻ Tốc Độ Cao</title>
+    <title>CloudVault Pro - Nền Tảng Lưu Trữ & Chia Sẻ</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -67,16 +67,20 @@
                 </div>
             </div>
 
-            <!-- Server Status & Refresh -->
+            <!-- Server Status & Admin Login Controls -->
             <div class="flex items-center space-x-2.5">
-                <div class="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 shadow-2xs">
+                <div class="hidden sm:inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 shadow-2xs">
                     <span class="w-2 h-2 mr-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>Hệ Thống Trực Tuyến</span>
                 </div>
                 
-                <button id="btn-refresh" title="Làm mới danh sách" class="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-600 transition-all">
-                    <i class="fa-solid fa-arrows-rotate text-sm"></i>
-                </button>
+                <!-- Dynamic Admin Status Area -->
+                <div id="admin-auth-btn-area">
+                    <button onclick="openAdminLoginModal()" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 font-semibold text-xs transition-all flex items-center space-x-1.5 shadow-2xs border border-slate-200/60">
+                        <i class="fa-solid fa-lock text-[11px]"></i>
+                        <span>Quản Trị</span>
+                    </button>
+                </div>
             </div>
         </div>
     </header>
@@ -84,7 +88,7 @@
     <!-- Main Workspace -->
     <main class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-        <!-- Modern Upload Area -->
+        <!-- Upload Drop Area (Visible for Everyone) -->
         <section class="relative overflow-hidden rounded-3xl bg-white border border-slate-200/80 shadow-premium p-6 sm:p-8">
             <div class="absolute top-0 right-0 -mt-10 -mr-10 w-72 h-72 bg-gradient-to-bl from-blue-500/5 via-indigo-500/5 to-transparent rounded-full blur-3xl pointer-events-none"></div>
 
@@ -124,10 +128,37 @@
             </div>
         </section>
 
-        <!-- Explorer & File Vault -->
-        <section class="space-y-4">
+        <!-- Guest Session: Recently Uploaded Files (Only files uploaded in this browser session) -->
+        <section id="guest-recent-section" class="hidden space-y-3">
+            <div class="flex items-center justify-between px-1">
+                <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <i class="fa-solid fa-clock-rotate-left text-vault-500 mr-1.5"></i> Tệp bạn vừa tải lên
+                </h3>
+                <span class="text-[11px] text-slate-400">Liên kết tải trực tiếp & mã QR đã sẵn sàng</span>
+            </div>
+            <div id="guest-recent-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3"></div>
+        </section>
+
+        <!-- Admin File Vault Section (Visible only when Admin is Logged in) -->
+        <section id="admin-vault-section" class="hidden space-y-4 pt-2">
             
-            <!-- Controls Bar -->
+            <div class="flex items-center justify-between bg-blue-50/80 border border-blue-200/70 p-4 rounded-2xl">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                        <i class="fa-solid fa-crown"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900">Kho Lưu Trữ Quản Trị Viên</h3>
+                        <p class="text-xs text-blue-700 font-medium">Toàn quyền xem, tìm kiếm, tải về và quản lý tất cả tệp trong hệ thống.</p>
+                    </div>
+                </div>
+                <button id="btn-refresh" title="Làm mới" class="px-3 py-1.5 bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 rounded-xl text-xs font-semibold shadow-2xs transition flex items-center space-x-1.5">
+                    <i class="fa-solid fa-arrows-rotate text-xs"></i>
+                    <span>Làm mới</span>
+                </button>
+            </div>
+
+            <!-- Controls Bar (Filter, Search & View Switcher) -->
             <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
                 
                 <!-- Category Tabs -->
@@ -153,7 +184,7 @@
                 <div class="flex items-center space-x-2">
                     <div class="relative flex-1 sm:w-64">
                         <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                        <input type="text" id="search-input" placeholder="Tìm kiếm tệp tin..." class="w-full bg-white border border-slate-200 text-slate-800 pl-9 pr-8 py-2 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-vault-500/20 focus:border-vault-500 transition shadow-2xs">
+                        <input type="text" id="search-input" placeholder="Tìm kiếm tệp..." class="w-full bg-white border border-slate-200 text-slate-800 pl-9 pr-8 py-2 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-vault-500/20 focus:border-vault-500 transition shadow-2xs">
                         <button id="btn-clear-search" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 hidden text-xs">
                             <i class="fa-solid fa-circle-xmark"></i>
                         </button>
@@ -170,25 +201,8 @@
                 </div>
             </div>
 
-            <!-- Files Grid / List -->
-            <div id="files-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4">
-                <!-- Skeleton Skeletons during loading -->
-                <div class="skeleton-card h-48 rounded-2xl bg-white border border-slate-200 animate-pulse p-3 space-y-3">
-                    <div class="h-28 bg-slate-100 rounded-xl"></div>
-                    <div class="h-3 bg-slate-100 rounded w-3/4"></div>
-                    <div class="h-2 bg-slate-100 rounded w-1/2"></div>
-                </div>
-                <div class="skeleton-card h-48 rounded-2xl bg-white border border-slate-200 animate-pulse p-3 space-y-3">
-                    <div class="h-28 bg-slate-100 rounded-xl"></div>
-                    <div class="h-3 bg-slate-100 rounded w-3/4"></div>
-                    <div class="h-2 bg-slate-100 rounded w-1/2"></div>
-                </div>
-                <div class="skeleton-card h-48 rounded-2xl bg-white border border-slate-200 animate-pulse p-3 space-y-3">
-                    <div class="h-28 bg-slate-100 rounded-xl"></div>
-                    <div class="h-3 bg-slate-100 rounded w-3/4"></div>
-                    <div class="h-2 bg-slate-100 rounded w-1/2"></div>
-                </div>
-            </div>
+            <!-- Admin Files Grid / List -->
+            <div id="files-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4"></div>
 
             <!-- Empty State -->
             <div id="empty-state" class="hidden py-16 text-center bg-white rounded-3xl border border-slate-200/80">
@@ -196,10 +210,40 @@
                     <i class="fa-regular fa-folder-open"></i>
                 </div>
                 <h4 class="font-bold text-slate-700 text-sm">Kho lưu trữ đang trống</h4>
-                <p class="text-xs text-slate-400 mt-1">Hãy kéo thả tệp lên khung trên để tải lên ngay</p>
+                <p class="text-xs text-slate-400 mt-1">Chưa có tệp nào được tải lên hệ thống</p>
             </div>
         </section>
     </main>
+
+    <!-- Admin Login Modal -->
+    <div id="admin-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 animate-scale-up">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div class="flex items-center space-x-2">
+                    <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xs">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-900 text-sm">Đăng Nhập Quản Trị</h3>
+                </div>
+                <button onclick="closeAdminLoginModal()" class="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-500">Nhập mật khẩu quản trị để truy cập và quản lý toàn bộ kho tệp hệ thống.</p>
+
+            <form id="admin-login-form" class="space-y-3">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Mật khẩu Admin</label>
+                    <input type="password" id="admin-password-input" placeholder="Nhập mật khẩu..." class="w-full bg-slate-50 border border-slate-200 text-slate-800 px-3.5 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-vault-500/20 focus:border-vault-500 transition" required autofocus>
+                </div>
+                <button type="submit" id="btn-submit-login" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 active:scale-98 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center justify-center space-x-1.5">
+                    <i class="fa-solid fa-arrow-right-to-bracket"></i>
+                    <span>Mở Khóa Quản Trị</span>
+                </button>
+            </form>
+        </div>
+    </div>
 
     <!-- QR Code Modal -->
     <div id="qr-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">

@@ -1,22 +1,30 @@
 /**
- * CloudVault Pro - Frontend Engine
- * Direct Zero-Login Upload Gateway & Enterprise Cloud Storage
+ * CloudVault Pro - Dual-Mode Engine (Guest Upload & Admin Management)
+ * Default Admin Password: huannet123
  */
 
 const WORKER_URL = 'https://onedrive-upload.huannet2018.workers.dev';
 
 let cloudFiles = [];
+let guestRecentFiles = [];
 let currentCategory = 'all';
 let currentSearch = '';
 let isListView = false;
-let currentPreviewFile = null;
 let qrCodeInstance = null;
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
     initUI();
-    loadCloudFiles();
+    renderAuthStatus();
+    loadGuestRecentFiles();
+    if (isAdmin()) {
+        loadAdminCloudFiles();
+    }
 });
+
+function isAdmin() {
+    return sessionStorage.getItem('cloudvault_admin_auth') === 'true';
+}
 
 function initUI() {
     const dropZone = document.getElementById('drop-zone');
@@ -60,13 +68,13 @@ function initUI() {
     if (refreshBtn) {
         refreshBtn.addEventListener('click', () => {
             refreshBtn.querySelector('i').classList.add('fa-spin');
-            loadCloudFiles().finally(() => {
+            loadAdminCloudFiles().finally(() => {
                 setTimeout(() => refreshBtn.querySelector('i').classList.remove('fa-spin'), 600);
             });
         });
     }
 
-    // Category Tabs
+    // Category Tabs (Admin)
     const categoryTabs = document.getElementById('category-tabs');
     if (categoryTabs) {
         categoryTabs.addEventListener('click', (e) => {
@@ -83,7 +91,7 @@ function initUI() {
         });
     }
 
-    // Search Input
+    // Search Input (Admin)
     const searchInput = document.getElementById('search-input');
     const clearSearchBtn = document.getElementById('btn-clear-search');
     if (searchInput) {
@@ -104,7 +112,7 @@ function initUI() {
         });
     }
 
-    // View Switcher
+    // View Switcher (Admin)
     const btnGrid = document.getElementById('btn-view-grid');
     const btnList = document.getElementById('btn-view-list');
     const container = document.getElementById('files-container');
@@ -139,9 +147,105 @@ function initUI() {
             }
         });
     }
+
+    // Admin Login Form Submit
+    const adminForm = document.getElementById('admin-login-form');
+    if (adminForm) {
+        adminForm.addEventListener('submit', handleAdminLogin);
+    }
 }
 
-// 1. Upload Files
+// 0. Auth & UI State
+function renderAuthStatus() {
+    const area = document.getElementById('admin-auth-btn-area');
+    const adminVault = document.getElementById('admin-vault-section');
+
+    if (!area) return;
+
+    if (isAdmin()) {
+        area.innerHTML = `
+            <div class="flex items-center space-x-2">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-xs">
+                    <i class="fa-solid fa-crown text-[10px] mr-1.5"></i> Admin
+                </span>
+                <button onclick="handleAdminLogout()" class="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 font-semibold text-xs transition border border-slate-200/60" title="Đăng xuất">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                </button>
+            </div>
+        `;
+        if (adminVault) adminVault.classList.remove('hidden');
+    } else {
+        area.innerHTML = `
+            <button onclick="openAdminLoginModal()" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 font-semibold text-xs transition-all flex items-center space-x-1.5 shadow-2xs border border-slate-200/60">
+                <i class="fa-solid fa-lock text-[11px]"></i>
+                <span>Quản Trị</span>
+            </button>
+        `;
+        if (adminVault) adminVault.classList.add('hidden');
+    }
+}
+
+function openAdminLoginModal() {
+    const modal = document.getElementById('admin-modal');
+    const input = document.getElementById('admin-password-input');
+    if (modal) modal.classList.remove('hidden');
+    if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 100);
+    }
+}
+
+function closeAdminLoginModal() {
+    const modal = document.getElementById('admin-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleAdminLogin(e) {
+    e.preventDefault();
+    const passInput = document.getElementById('admin-password-input');
+    const password = passInput ? passInput.value.trim() : '';
+
+    if (!password) return;
+
+    try {
+        const res = await fetch(`${WORKER_URL}/admin/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            sessionStorage.setItem('cloudvault_admin_auth', 'true');
+            closeAdminLoginModal();
+            renderAuthStatus();
+            showToast('👑 Đăng nhập Quản Trị Viên thành công!', 'success');
+            loadAdminCloudFiles();
+        } else {
+            showToast(data.message || 'Mật khẩu quản trị không đúng!', 'error');
+        }
+    } catch (err) {
+        // Fallback check
+        if (password === 'huannet123') {
+            sessionStorage.setItem('cloudvault_admin_auth', 'true');
+            closeAdminLoginModal();
+            renderAuthStatus();
+            showToast('👑 Đăng nhập Quản Trị Viên thành công!', 'success');
+            loadAdminCloudFiles();
+        } else {
+            showToast('Mật khẩu quản trị không chính xác!', 'error');
+        }
+    }
+}
+
+function handleAdminLogout() {
+    sessionStorage.removeItem('cloudvault_admin_auth');
+    renderAuthStatus();
+    showToast('Đã đăng xuất khỏi quyền Quản trị', 'info');
+}
+
+// 1. Upload Files (Public)
 async function handleUploadFiles(files) {
     const queue = document.getElementById('upload-queue');
     const queueItems = document.getElementById('queue-items');
@@ -205,7 +309,14 @@ async function handleUploadFiles(files) {
                     </div>
                 `;
                 showToast(`✓ Đã tải lên "${file.name}" thành công!`, 'success');
-                loadCloudFiles();
+
+                // Save to guest session
+                saveGuestRecentFile(resData.file);
+
+                // If admin is active, refresh explorer
+                if (isAdmin()) {
+                    loadAdminCloudFiles();
+                }
             } else {
                 throw new Error(resData.message || 'Lỗi kết nối máy chủ');
             }
@@ -234,11 +345,70 @@ function updateQueueCount() {
     }
 }
 
-// 2. Fetch Files
-async function loadCloudFiles() {
+// 2. Guest Recent Uploads Handler
+function saveGuestRecentFile(file) {
+    guestRecentFiles.unshift(file);
+    renderGuestRecentSection();
+}
+
+function loadGuestRecentFiles() {
+    renderGuestRecentSection();
+}
+
+function renderGuestRecentSection() {
+    const section = document.getElementById('guest-recent-section');
+    const container = document.getElementById('guest-recent-container');
+
+    if (!section || !container) return;
+
+    if (guestRecentFiles.length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+
+    section.classList.remove('hidden');
+    container.innerHTML = '';
+
+    guestRecentFiles.forEach(file => {
+        const el = document.createElement('div');
+        el.className = 'bg-white border border-slate-200/90 rounded-2xl p-3.5 flex flex-col justify-between space-y-3 shadow-2xs';
+        el.innerHTML = `
+            <div class="flex items-center space-x-2.5 truncate">
+                <div class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
+                    <i class="${getFileIcon(file.name)}"></i>
+                </div>
+                <div class="truncate">
+                    <h4 class="font-bold text-xs text-slate-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</h4>
+                    <p class="text-[10px] text-slate-400">${formatBytes(file.size)} &bull; Vừa tải lên</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 pt-1 border-t border-slate-100">
+                <button onclick="copyToClipboard('${file.download_url}')" class="flex-1 py-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 rounded-xl text-xs font-semibold transition text-center">
+                    <i class="fa-regular fa-copy mr-1"></i> Copy Link
+                </button>
+                <button onclick="openCustomQrModal('${file.name}', '${file.download_url}')" class="p-1.5 px-2.5 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 rounded-xl text-xs font-semibold transition" title="Mã QR">
+                    <i class="fa-solid fa-qrcode"></i>
+                </button>
+                <a href="${file.download_url}" target="_blank" download class="p-1.5 px-2.5 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 rounded-xl text-xs font-semibold transition" title="Tải về">
+                    <i class="fa-solid fa-download"></i>
+                </a>
+            </div>
+        `;
+        container.appendChild(el);
+    });
+}
+
+// 3. Admin: Fetch All Files
+async function loadAdminCloudFiles() {
+    if (!isAdmin()) return;
+
     try {
-        const res = await fetch(`${WORKER_URL}/files`);
-        if (!res.ok) throw new Error('Không thể tải danh sách tệp');
+        const res = await fetch(`${WORKER_URL}/files`, {
+            headers: { 'Authorization': 'Bearer admin_authenticated' }
+        });
+
+        if (!res.ok) throw new Error('Yêu cầu quyền Quản trị');
+
         const data = await res.json();
 
         if (data.success && Array.isArray(data.files)) {
@@ -254,7 +424,7 @@ async function loadCloudFiles() {
     }
 }
 
-// 3. Filter and Render Files
+// 4. Admin: Filter and Render Files
 function filterAndRenderFiles() {
     const container = document.getElementById('files-container');
     const emptyState = document.getElementById('empty-state');
@@ -320,7 +490,7 @@ function createFileCard(file) {
             <button onclick="copyToClipboard('${file.download_url}')" class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Sao chép link tải">
                 <i class="fa-regular fa-copy"></i>
             </button>
-            <button onclick="openQrModal('${file.id}')" class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Tạo mã QR">
+            <button onclick="openCustomQrModal('${file.name}', '${file.download_url}')" class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Tạo mã QR">
                 <i class="fa-solid fa-qrcode"></i>
             </button>
             <a href="${file.download_url}" target="_blank" download class="p-1.5 px-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg text-xs font-semibold transition" title="Tải về">
@@ -335,15 +505,18 @@ function createFileCard(file) {
     return card;
 }
 
-// 4. Delete File
+// 5. Admin: Delete File
 async function deleteFile(fileId, fileName) {
-    if (!confirm(`Bạn có chắc muốn xóa tệp "${fileName}"?`)) return;
+    if (!confirm(`Bạn có chắc muốn xóa tệp "${fileName}" khỏi hệ thống?`)) return;
 
     showToast(`Đang xóa tệp...`, 'info');
     try {
         const res = await fetch(`${WORKER_URL}/delete`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer admin_authenticated'
+            },
             body: JSON.stringify({ id: fileId })
         });
         const data = await res.json();
@@ -360,22 +533,19 @@ async function deleteFile(fileId, fileName) {
     }
 }
 
-// 5. QR Code Modal
-function openQrModal(fileId) {
-    const file = cloudFiles.find(f => f.id === fileId);
-    if (!file) return;
-
+// 6. QR Code Modal
+function openCustomQrModal(fileName, downloadUrl) {
     const modal = document.getElementById('qr-modal');
     const nameEl = document.getElementById('qr-file-name');
     const qrCanvas = document.getElementById('qr-code-canvas');
     const copyBtn = document.getElementById('btn-copy-qr-link');
     const downloadBtn = document.getElementById('btn-download-qr-img');
 
-    if (nameEl) nameEl.innerText = file.name;
+    if (nameEl) nameEl.innerText = fileName;
     if (qrCanvas) {
         qrCanvas.innerHTML = '';
         qrCodeInstance = new QRCode(qrCanvas, {
-            text: file.download_url,
+            text: downloadUrl,
             width: 170,
             height: 170,
             colorDark: "#0F172A",
@@ -385,10 +555,10 @@ function openQrModal(fileId) {
     }
 
     if (copyBtn) {
-        copyBtn.onclick = () => copyToClipboard(file.download_url);
+        copyBtn.onclick = () => copyToClipboard(downloadUrl);
     }
     if (downloadBtn) {
-        downloadBtn.onclick = () => downloadQrImage(file.name);
+        downloadBtn.onclick = () => downloadQrImage(fileName);
     }
 
     if (modal) modal.classList.remove('hidden');
@@ -411,7 +581,7 @@ function downloadQrImage(fileName) {
     showToast('✓ Đã lưu ảnh mã QR!', 'success');
 }
 
-// 6. Preview Modal
+// 7. Preview Modal
 function openPreview(fileId) {
     const file = cloudFiles.find(f => f.id === fileId);
     if (!file) return;
@@ -429,7 +599,7 @@ function openPreview(fileId) {
     
     if (copyBtn) copyBtn.onclick = () => copyToClipboard(file.download_url);
     if (downloadBtn) downloadBtn.href = file.download_url;
-    if (qrBtn) qrBtn.onclick = () => { closePreviewModal(); openQrModal(fileId); };
+    if (qrBtn) qrBtn.onclick = () => { closePreviewModal(); openCustomQrModal(file.name, file.download_url); };
 
     const cat = getFileCategory(file.name);
     if (cat === 'image') {
