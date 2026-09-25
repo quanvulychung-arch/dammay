@@ -37,10 +37,11 @@
     </script>
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <!-- Microsoft MSAL.js for OAuth2 (OneDrive API) -->
-    <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+    
+    <!-- Microsoft MSAL.js Global High-Speed CDN (jsDelivr) -->
+    <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
     <!-- Microsoft Graph JavaScript SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@microsoft/microsoft-graph-client/lib/graph-js-sdk.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/microsoft-graph-client@3.0.7/lib/graph-js-sdk.js"></script>
     <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link rel="stylesheet" href="style.css">
@@ -83,7 +84,7 @@
         <div id="error-banner" class="hidden bg-red-50 border border-red-200 rounded-[20px] p-4 text-red-700 shadow-sm text-xs space-y-1">
             <div class="font-bold flex items-center">
                 <i class="fa-solid fa-circle-exclamation mr-2 text-base text-red-500"></i>
-                <span id="error-banner-title">Thông báo lỗi từ Microsoft:</span>
+                <span id="error-banner-title">Thông báo lỗi:</span>
             </div>
             <p id="error-banner-desc" class="font-mono text-[11px] break-all"></p>
         </div>

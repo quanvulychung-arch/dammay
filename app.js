@@ -33,11 +33,28 @@ let currentCategory = 'all';
 let currentSearch = '';
 let currentPreviewFile = null;
 
-// Initialize MSAL Safely (Supports both MSAL v2 and v3)
+// Get the MSAL constructor safely from window
+function getMsalConstructor() {
+    if (typeof msal !== 'undefined' && msal.PublicClientApplication) {
+        return msal.PublicClientApplication;
+    }
+    if (typeof msalBrowser !== 'undefined' && msalBrowser.PublicClientApplication) {
+        return msalBrowser.PublicClientApplication;
+    }
+    if (window.msal && window.msal.PublicClientApplication) {
+        return window.msal.PublicClientApplication;
+    }
+    return null;
+}
+
+// Initialize MSAL Safely
 async function initMsal() {
     if (!msalInstance) {
-        msalInstance = new msal.PublicClientApplication(msalConfig);
-        // If MSAL v3+ initialize function exists, call it
+        const PCA = getMsalConstructor();
+        if (!PCA) {
+            throw new Error("Thư viện Microsoft MSAL chưa tải xong. Vui lòng thử lại sau vài giây hoặc kiểm tra kết nối mạng.");
+        }
+        msalInstance = new PCA(msalConfig);
         if (typeof msalInstance.initialize === 'function') {
             await msalInstance.initialize();
         }
@@ -175,7 +192,7 @@ async function getAccessToken() {
         const response = await client.acquireTokenSilent(request);
         return response.accessToken;
     } catch (error) {
-        if (error instanceof msal.InteractionRequiredAuthError) {
+        if (error.name === 'InteractionRequiredAuthError' || (error.message && error.message.includes('interaction_required'))) {
             const response = await client.acquireTokenPopup(request);
             return response.accessToken;
         }
@@ -211,7 +228,7 @@ async function loginMicrosoft() {
     } catch (err) {
         console.warn("Popup login error:", err);
         
-        // If popup was blocked or failed, try full redirect mode
+        // If popup was blocked or failed, try redirect mode
         if (err.errorCode === 'popup_window_error' || err.errorCode === 'empty_window_error' || err.name === 'BrowserAuthError') {
             try {
                 const client = await initMsal();
