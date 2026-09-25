@@ -1,9 +1,10 @@
 /**
  * CloudVault Pro - Dual-Mode Engine (Guest Upload & Admin Management)
- * Default Admin Password: huannet123
+ * Master Admin Password: huannet123
  */
 
 const WORKER_URL = 'https://onedrive-upload.huannet2018.workers.dev';
+const MASTER_ADMIN_PASS = 'huannet123';
 
 let cloudFiles = [];
 let guestRecentFiles = [];
@@ -23,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function isAdmin() {
-    return sessionStorage.getItem('cloudvault_admin_auth') === 'true';
+    return localStorage.getItem('cloudvault_admin_auth') === 'true' || sessionStorage.getItem('cloudvault_admin_auth') === 'true';
 }
 
 function initUI() {
@@ -67,9 +68,10 @@ function initUI() {
     const refreshBtn = document.getElementById('btn-refresh');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', () => {
-            refreshBtn.querySelector('i').classList.add('fa-spin');
+            const icon = refreshBtn.querySelector('i');
+            if (icon) icon.classList.add('fa-spin');
             loadAdminCloudFiles().finally(() => {
-                setTimeout(() => refreshBtn.querySelector('i').classList.remove('fa-spin'), 600);
+                setTimeout(() => { if (icon) icon.classList.remove('fa-spin'); }, 600);
             });
         });
     }
@@ -165,10 +167,10 @@ function renderAuthStatus() {
     if (isAdmin()) {
         area.innerHTML = `
             <div class="flex items-center space-x-2">
-                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-xs">
-                    <i class="fa-solid fa-crown text-[10px] mr-1.5"></i> Admin
+                <span class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-sm">
+                    <i class="fa-solid fa-crown text-[11px] mr-1.5"></i> Quản Trị Viên
                 </span>
-                <button onclick="handleAdminLogout()" class="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 font-semibold text-xs transition border border-slate-200/60" title="Đăng xuất">
+                <button onclick="handleAdminLogout()" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 font-semibold text-xs transition border border-slate-200/60" title="Đăng xuất">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i>
                 </button>
             </div>
@@ -191,7 +193,7 @@ function openAdminLoginModal() {
     if (modal) modal.classList.remove('hidden');
     if (input) {
         input.value = '';
-        setTimeout(() => input.focus(), 100);
+        setTimeout(() => input.focus(), 150);
     }
 }
 
@@ -207,39 +209,41 @@ async function handleAdminLogin(e) {
 
     if (!password) return;
 
+    // Direct Instant Verification for Master Password
+    if (password === MASTER_ADMIN_PASS) {
+        localStorage.setItem('cloudvault_admin_auth', 'true');
+        sessionStorage.setItem('cloudvault_admin_auth', 'true');
+        closeAdminLoginModal();
+        renderAuthStatus();
+        showToast('👑 Đăng nhập Quản Trị Viên thành công!', 'success');
+        loadAdminCloudFiles();
+        return;
+    }
+
+    // Try Worker Verification as well
     try {
         const res = await fetch(`${WORKER_URL}/admin/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ password })
         });
-
         const data = await res.json();
-
         if (res.ok && data.success) {
+            localStorage.setItem('cloudvault_admin_auth', 'true');
             sessionStorage.setItem('cloudvault_admin_auth', 'true');
             closeAdminLoginModal();
             renderAuthStatus();
             showToast('👑 Đăng nhập Quản Trị Viên thành công!', 'success');
             loadAdminCloudFiles();
-        } else {
-            showToast(data.message || 'Mật khẩu quản trị không đúng!', 'error');
+            return;
         }
-    } catch (err) {
-        // Fallback check
-        if (password === 'huannet123') {
-            sessionStorage.setItem('cloudvault_admin_auth', 'true');
-            closeAdminLoginModal();
-            renderAuthStatus();
-            showToast('👑 Đăng nhập Quản Trị Viên thành công!', 'success');
-            loadAdminCloudFiles();
-        } else {
-            showToast('Mật khẩu quản trị không chính xác!', 'error');
-        }
-    }
+    } catch (e) {}
+
+    showToast('Mật khẩu quản trị không chính xác!', 'error');
 }
 
 function handleAdminLogout() {
+    localStorage.removeItem('cloudvault_admin_auth');
     sessionStorage.removeItem('cloudvault_admin_auth');
     renderAuthStatus();
     showToast('Đã đăng xuất khỏi quyền Quản trị', 'info');
@@ -403,16 +407,18 @@ async function loadAdminCloudFiles() {
     if (!isAdmin()) return;
 
     try {
-        const res = await fetch(`${WORKER_URL}/files`, {
+        const res = await fetch(`${WORKER_URL}/files?pass=${MASTER_ADMIN_PASS}`, {
             headers: { 'Authorization': 'Bearer admin_authenticated' }
         });
-
-        if (!res.ok) throw new Error('Yêu cầu quyền Quản trị');
 
         const data = await res.json();
 
         if (data.success && Array.isArray(data.files)) {
             cloudFiles = data.files;
+            updateCategoryCounts();
+            filterAndRenderFiles();
+        } else if (Array.isArray(data)) {
+            cloudFiles = data;
             updateCategoryCounts();
             filterAndRenderFiles();
         } else {
