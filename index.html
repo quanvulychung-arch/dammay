@@ -37,11 +37,6 @@
     </script>
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    
-    <!-- Microsoft MSAL.js Global High-Speed CDN (jsDelivr) -->
-    <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
-    <!-- Microsoft Graph JavaScript SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@microsoft/microsoft-graph-client@3.0.7/lib/graph-js-sdk.js"></script>
     <!-- QR Code Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link rel="stylesheet" href="style.css">
@@ -80,16 +75,16 @@
     <!-- Main App Container -->
     <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-5 space-y-5 pb-24 sm:pb-12">
         
-        <!-- Detailed Error Notice (If Login encounters error) -->
+        <!-- Detailed Error Notice -->
         <div id="error-banner" class="hidden bg-red-50 border border-red-200 rounded-[20px] p-4 text-red-700 shadow-sm text-xs space-y-1">
             <div class="font-bold flex items-center">
                 <i class="fa-solid fa-circle-exclamation mr-2 text-base text-red-500"></i>
-                <span id="error-banner-title">Thông báo lỗi:</span>
+                <span id="error-banner-title">Thông báo:</span>
             </div>
             <p id="error-banner-desc" class="font-mono text-[11px] break-all"></p>
         </div>
 
-        <!-- Upload Zone (Authenticated Admin) -->
+        <!-- Upload Zone -->
         <div id="upload-card" class="bg-white rounded-[24px] p-5 sm:p-6 border border-[rgba(60,60,67,0.08)] shadow-sm relative overflow-hidden">
             <div id="drop-zone" class="border-2 border-dashed border-[#0078D4]/30 hover:border-[#0078D4] hover:bg-sky-50/40 rounded-[20px] p-6 sm:p-8 text-center transition-all cursor-pointer group relative">
                 <input type="file" id="file-input" multiple class="hidden">
@@ -242,7 +237,7 @@
         </div>
     </div>
 
-    <!-- Config Modal (For Microsoft Azure Client ID) -->
+    <!-- Config Modal -->
     <div id="config-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
         <div class="bg-white rounded-[24px] max-w-sm w-full p-5 space-y-4 shadow-2xl border border-[rgba(60,60,67,0.08)]">
             <div class="flex items-center justify-between">
@@ -252,7 +247,7 @@
             
             <div>
                 <label class="text-xs font-semibold text-gray-700 block mb-1">Application (Client) ID:</label>
-                <input type="text" id="config-client-id" placeholder="vd: cde527a1-c2b6-4203-80a3-fe29e8cd9faf" 
+                <input type="text" id="config-client-id" placeholder="cde527a1-c2b6-4203-80a3-fe29e8cd9faf" 
                     class="w-full px-3 py-2 bg-[#F2F2F7] border border-gray-200 rounded-[12px] text-xs font-mono outline-none focus:border-[#0078D4]">
             </div>
 

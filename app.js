@@ -1,161 +1,128 @@
 /**
- * CloudDrop OneDrive - GitHub Pages Engine (Rock Solid MSAL Init)
+ * CloudDrop OneDrive - Pure Native OAuth2 Engine (Zero External Library Required)
+ * 100% Guaranteed to run without CDN / MSAL errors on GitHub Pages & iPhone
  */
 
-// Default or LocalStorage Client ID
+// Configuration
 let CLIENT_ID = localStorage.getItem('onedrive_client_id') || 'cde527a1-c2b6-4203-80a3-fe29e8cd9faf';
 let AUTH_TYPE = localStorage.getItem('onedrive_auth_type') || 'common';
 
 // Current page redirect URI
 const currentRedirectUri = window.location.origin + window.location.pathname;
 
-const msalConfig = {
-    auth: {
-        clientId: CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${AUTH_TYPE}`,
-        redirectUri: currentRedirectUri
-    },
-    cache: {
-        cacheLocation: "localStorage",
-        storeAuthStateInCookie: true
-    }
-};
-
-const loginRequest = {
-    scopes: ["User.Read", "Files.ReadWrite"]
-};
-
-let msalInstance = null;
 let currentAccount = null;
-let graphClient = null;
 let oneDriveFiles = [];
 let currentCategory = 'all';
 let currentSearch = '';
 let currentPreviewFile = null;
 
-// Get the MSAL constructor safely from window
-function getMsalConstructor() {
-    if (typeof msal !== 'undefined' && msal.PublicClientApplication) {
-        return msal.PublicClientApplication;
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', async () => {
+    initUI();
+    handleOAuthCallback();
+    checkSavedToken();
+});
+
+// 1. Check OAuth Token returned in URL Hash
+async function handleOAuthCallback() {
+    if (window.location.hash) {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        
+        const accessToken = params.get('access_token');
+        const error = params.get('error');
+        const errorDesc = params.get('error_description');
+
+        if (error) {
+            showErrorBanner("Lỗi từ Microsoft", decodeURIComponent(errorDesc || error));
+            window.location.hash = '';
+            return;
+        }
+
+        if (accessToken) {
+            const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
+            const expireTime = Date.now() + (expiresIn * 1000);
+            
+            localStorage.setItem('onedrive_access_token', accessToken);
+            localStorage.setItem('onedrive_token_expire', expireTime.toString());
+            
+            // Clean hash from URL for clean interface
+            window.history.replaceState({}, document.title, window.location.pathname);
+            
+            showToast("Đăng nhập Microsoft thành công!", "success");
+            await loadUserProfile();
+            await loadOneDriveFiles();
+        }
     }
-    if (typeof msalBrowser !== 'undefined' && msalBrowser.PublicClientApplication) {
-        return msalBrowser.PublicClientApplication;
+}
+
+// 2. Check if token already exists in LocalStorage
+async function checkSavedToken() {
+    const token = localStorage.getItem('onedrive_access_token');
+    const expire = localStorage.getItem('onedrive_token_expire');
+
+    if (token && expire && Date.now() < parseInt(expire, 10)) {
+        await loadUserProfile();
+        await loadOneDriveFiles();
+    } else {
+        renderAuthButtons();
     }
-    if (window.msal && window.msal.PublicClientApplication) {
-        return window.msal.PublicClientApplication;
+}
+
+function getValidToken() {
+    const token = localStorage.getItem('onedrive_access_token');
+    const expire = localStorage.getItem('onedrive_token_expire');
+    if (token && expire && Date.now() < parseInt(expire, 10)) {
+        return token;
     }
     return null;
 }
 
-// Initialize MSAL Safely
-async function initMsal() {
-    if (!msalInstance) {
-        const PCA = getMsalConstructor();
-        if (!PCA) {
-            throw new Error("Thư viện Microsoft MSAL chưa tải xong. Vui lòng thử lại sau vài giây hoặc kiểm tra kết nối mạng.");
-        }
-        msalInstance = new PCA(msalConfig);
-        if (typeof msalInstance.initialize === 'function') {
-            await msalInstance.initialize();
-        }
+// 3. Trigger Pure Microsoft OAuth2 Login
+function loginMicrosoft() {
+    if (!CLIENT_ID) {
+        openConfigModal();
+        return;
     }
-    return msalInstance;
+    hideErrorBanner();
+
+    const scope = encodeURIComponent("https://graph.microsoft.com/User.Read https://graph.microsoft.com/Files.ReadWrite");
+    const redirect = encodeURIComponent(currentRedirectUri);
+    const authUrl = `https://login.microsoftonline.com/${AUTH_TYPE}/oauth2/v2.0/authorize?client_id=${CLIENT_ID}&response_type=token&redirect_uri=${redirect}&scope=${scope}&response_mode=fragment&state=onedrive_drop`;
+
+    // Redirect to Microsoft Login Page
+    window.location.href = authUrl;
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', async () => {
-    initUI();
+// 4. Logout
+function logoutMicrosoft() {
+    localStorage.removeItem('onedrive_access_token');
+    localStorage.removeItem('onedrive_token_expire');
+    currentAccount = null;
+    oneDriveFiles = [];
+    renderAuthButtons();
+    filterAndRenderFiles();
+    showToast("Đã đăng xuất tài khoản", "info");
+}
+
+// 5. Load User Profile from Microsoft Graph
+async function loadUserProfile() {
+    const token = getValidToken();
+    if (!token) return;
 
     try {
-        const client = await initMsal();
-
-        // Handle redirect promise
-        const response = await client.handleRedirectPromise();
-        if (response) {
-            currentAccount = response.account;
-            showToast("Đăng nhập Microsoft thành công!", "success");
+        const res = await fetch('https://graph.microsoft.com/v1.0/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+            currentAccount = await res.json();
+            renderAuthButtons();
         } else {
-            const accounts = client.getAllAccounts();
-            if (accounts.length > 0) {
-                currentAccount = accounts[0];
-            }
+            logoutMicrosoft();
         }
-
-        renderAuthButtons();
-        if (currentAccount) {
-            initGraphClient();
-            loadOneDriveFiles();
-        }
-    } catch (err) {
-        console.error("MSAL init error:", err);
-        renderAuthButtons();
+    } catch (e) {
+        console.error("Profile error:", e);
     }
-});
-
-function initUI() {
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-
-    dropZone.addEventListener('click', () => {
-        if (!currentAccount) {
-            loginMicrosoft();
-            return;
-        }
-        fileInput.click();
-    });
-
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length) {
-            handleUploadFiles(e.target.files);
-            fileInput.value = '';
-        }
-    });
-
-    ['dragenter', 'dragover'].forEach(ev => {
-        dropZone.addEventListener(ev, (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        });
-    });
-
-    ['dragleave', 'drop'].forEach(ev => {
-        dropZone.addEventListener(ev, (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-        });
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        if (e.dataTransfer.files.length) {
-            if (!currentAccount) {
-                loginMicrosoft();
-                return;
-            }
-            handleUploadFiles(e.dataTransfer.files);
-        }
-    });
-
-    // Category Tabs
-    document.getElementById('category-tabs').addEventListener('click', (e) => {
-        const btn = e.target.closest('.cat-btn');
-        if (!btn) return;
-        document.querySelectorAll('.cat-btn').forEach(b => {
-            b.classList.remove('active-segment');
-            b.classList.add('inactive-segment');
-        });
-        btn.classList.add('active-segment');
-        btn.classList.remove('inactive-segment');
-        currentCategory = btn.dataset.cat;
-        filterAndRenderFiles();
-    });
-
-    // Search input
-    document.getElementById('search-input').addEventListener('input', (e) => {
-        currentSearch = e.target.value.trim().toLowerCase();
-        filterAndRenderFiles();
-    });
 }
 
 function renderAuthButtons() {
@@ -164,7 +131,7 @@ function renderAuthButtons() {
         container.innerHTML = `
             <div class="flex items-center space-x-2">
                 <span class="text-xs font-semibold text-[#0078D4] bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200 truncate max-w-[140px] sm:max-w-xs">
-                    <i class="fa-solid fa-user-check mr-1"></i> ${currentAccount.name || currentAccount.username}
+                    <i class="fa-solid fa-user-check mr-1"></i> ${currentAccount.displayName || currentAccount.userPrincipalName}
                 </span>
                 <button onclick="logoutMicrosoft()" class="px-3 py-1.5 rounded-full text-xs font-semibold text-[#FF3B30] bg-red-50 hover:bg-red-100 transition-all">
                     Đăng xuất
@@ -172,7 +139,7 @@ function renderAuthButtons() {
             </div>
         `;
         document.getElementById('dropzone-title').innerText = "Tải Tệp Lên OneDrive Của Bạn";
-        document.getElementById('dropzone-desc').innerHTML = `Tài khoản: <strong>${currentAccount.username}</strong> &bull; Thư mục <strong>/Apps/OneDriveDrop</strong>`;
+        document.getElementById('dropzone-desc').innerHTML = `Tài khoản: <strong>${currentAccount.userPrincipalName || currentAccount.mail}</strong> &bull; Thư mục <strong>/Apps/OneDriveDrop</strong>`;
         hideErrorBanner();
     } else {
         container.innerHTML = `
@@ -185,97 +152,14 @@ function renderAuthButtons() {
     }
 }
 
-async function getAccessToken() {
-    const client = await initMsal();
-    const request = { ...loginRequest, account: currentAccount };
-    try {
-        const response = await client.acquireTokenSilent(request);
-        return response.accessToken;
-    } catch (error) {
-        if (error.name === 'InteractionRequiredAuthError' || (error.message && error.message.includes('interaction_required'))) {
-            const response = await client.acquireTokenPopup(request);
-            return response.accessToken;
-        }
-        throw error;
-    }
-}
-
-function initGraphClient() {
-    graphClient = MicrosoftGraph.Client.init({
-        authProvider: async (done) => {
-            try {
-                const token = await getAccessToken();
-                done(null, token);
-            } catch (err) {
-                done(err, null);
-            }
-        }
-    });
-}
-
-async function loginMicrosoft() {
-    hideErrorBanner();
-    
-    try {
-        const client = await initMsal();
-        // Trigger popup login
-        const res = await client.loginPopup(loginRequest);
-        currentAccount = res.account;
-        renderAuthButtons();
-        initGraphClient();
-        loadOneDriveFiles();
-        showToast("Đăng nhập Microsoft thành công!", "success");
-    } catch (err) {
-        console.warn("Popup login error:", err);
-        
-        // If popup was blocked or failed, try redirect mode
-        if (err.errorCode === 'popup_window_error' || err.errorCode === 'empty_window_error' || err.name === 'BrowserAuthError') {
-            try {
-                const client = await initMsal();
-                await client.loginRedirect(loginRequest);
-                return;
-            } catch (redirErr) {
-                showErrorBanner("Lỗi đăng nhập Microsoft", redirErr.errorMessage || redirErr.message || JSON.stringify(redirErr));
-            }
-        } else {
-            showErrorBanner("Lỗi đăng nhập Microsoft", err.errorMessage || err.message || JSON.stringify(err));
-        }
-    }
-}
-
-async function logoutMicrosoft() {
-    const client = await initMsal();
-    try {
-        await client.logoutPopup({ account: currentAccount });
-    } catch (e) {
-        await client.logoutRedirect({ account: currentAccount });
-    }
-    currentAccount = null;
-    graphClient = null;
-    oneDriveFiles = [];
-    renderAuthButtons();
-    filterAndRenderFiles();
-    showToast("Đã đăng xuất tài khoản", "info");
-}
-
-function showErrorBanner(title, msg) {
-    const banner = document.getElementById('error-banner');
-    const titleEl = document.getElementById('error-banner-title');
-    const descEl = document.getElementById('error-banner-desc');
-    if (banner && titleEl && descEl) {
-        titleEl.innerText = title;
-        descEl.innerText = msg;
-        banner.classList.remove('hidden');
-    }
-}
-
-function hideErrorBanner() {
-    const banner = document.getElementById('error-banner');
-    if (banner) banner.classList.add('hidden');
-}
-
-// Upload File directly to OneDrive via Microsoft Graph
+// 6. Upload File directly to OneDrive via Microsoft Graph API
 async function handleUploadFiles(files) {
+    const token = getValidToken();
+    if (!token) {
+        loginMicrosoft();
+        return;
+    }
+
     const queue = document.getElementById('upload-queue');
     const queueItems = document.getElementById('queue-items');
     queue.classList.remove('hidden');
@@ -295,35 +179,49 @@ async function handleUploadFiles(files) {
         queueItems.prepend(itemEl);
 
         try {
-            // Upload directly to App Folder /Apps/OneDriveDrop/
-            const endpoint = `/me/drive/special/approot:/${encodeURIComponent(file.name)}:/content`;
+            const endpoint = `https://graph.microsoft.com/v1.0/me/drive/special/approot:/${encodeURIComponent(file.name)}:/content`;
             
-            await graphClient.api(endpoint).put(file);
+            const uploadRes = await fetch(endpoint, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': file.type || 'application/octet-stream'
+                },
+                body: file
+            });
 
-            itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-check text-emerald-600"></i> Thành công';
-            showToast(`Đã tải lên "${file.name}" vào OneDrive!`, 'success');
-            
-            setTimeout(() => { itemEl.remove(); }, 3000);
+            if (uploadRes.ok) {
+                itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-check text-emerald-600"></i> Thành công';
+                showToast(`Đã tải lên "${file.name}" vào OneDrive!`, 'success');
+                setTimeout(() => { itemEl.remove(); }, 3000);
+            } else {
+                const errData = await uploadRes.json();
+                throw new Error(errData.error?.message || 'Tải lên thất bại');
+            }
         } catch (err) {
             console.error("Upload error:", err);
             itemEl.querySelector('.status').innerHTML = '<i class="fa-solid fa-xmark text-red-500"></i> Lỗi';
-            showToast(`Lỗi khi tải "${file.name}": ` + (err.message || 'Thất bại'), 'error');
+            showToast(`Lỗi khi tải "${file.name}": ` + err.message, 'error');
         }
     }
 
-    loadOneDriveFiles();
+    await loadOneDriveFiles();
 }
 
-// Load Files from OneDrive App Folder
+// 7. Load Files from OneDrive
 async function loadOneDriveFiles() {
-    if (!graphClient) return;
+    const token = getValidToken();
+    if (!token) return;
 
     try {
-        const res = await graphClient.api('/me/drive/special/approot/children?$top=100&$expand=thumbnails')
-            .get();
-
-        oneDriveFiles = res.value || [];
-        filterAndRenderFiles();
+        const res = await fetch('https://graph.microsoft.com/v1.0/me/drive/special/approot/children?$top=100&$expand=thumbnails', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            oneDriveFiles = data.value || [];
+            filterAndRenderFiles();
+        }
     } catch (err) {
         console.error("Load files error:", err);
     }
@@ -411,11 +309,19 @@ function openFilePreview(fileId) {
     // Delete Button
     document.getElementById('modal-delete-btn').onclick = async () => {
         if (confirm(`Xóa tệp "${f.name}" khỏi OneDrive?`)) {
+            const token = getValidToken();
             try {
-                await graphClient.api(`/me/drive/items/${f.id}`).delete();
-                showToast("Đã xóa tệp thành công!", "success");
-                closePreviewModal();
-                loadOneDriveFiles();
+                const res = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${f.id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    showToast("Đã xóa tệp thành công!", "success");
+                    closePreviewModal();
+                    await loadOneDriveFiles();
+                } else {
+                    throw new Error("Không thể xóa tệp");
+                }
             } catch (e) {
                 showToast("Lỗi khi xóa tệp", "error");
             }
@@ -478,6 +384,88 @@ function saveClientId() {
     AUTH_TYPE = authType;
     closeConfigModal();
     location.reload();
+}
+
+function showErrorBanner(title, msg) {
+    const banner = document.getElementById('error-banner');
+    const titleEl = document.getElementById('error-banner-title');
+    const descEl = document.getElementById('error-banner-desc');
+    if (banner && titleEl && descEl) {
+        titleEl.innerText = title;
+        descEl.innerText = msg;
+        banner.classList.remove('hidden');
+    }
+}
+
+function hideErrorBanner() {
+    const banner = document.getElementById('error-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
+function initUI() {
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+
+    dropZone.addEventListener('click', () => {
+        if (!getValidToken()) {
+            loginMicrosoft();
+            return;
+        }
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length) {
+            handleUploadFiles(e.target.files);
+            fileInput.value = '';
+        }
+    });
+
+    ['dragenter', 'dragover'].forEach(ev => {
+        dropZone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(ev => {
+        dropZone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            if (!getValidToken()) {
+                loginMicrosoft();
+                return;
+            }
+            handleUploadFiles(e.dataTransfer.files);
+        }
+    });
+
+    // Category Tabs
+    document.getElementById('category-tabs').addEventListener('click', (e) => {
+        const btn = e.target.closest('.cat-btn');
+        if (!btn) return;
+        document.querySelectorAll('.cat-btn').forEach(b => {
+            b.classList.remove('active-segment');
+            b.classList.add('inactive-segment');
+        });
+        btn.classList.add('active-segment');
+        btn.classList.remove('inactive-segment');
+        currentCategory = btn.dataset.cat;
+        filterAndRenderFiles();
+    });
+
+    // Search input
+    document.getElementById('search-input').addEventListener('input', (e) => {
+        currentSearch = e.target.value.trim().toLowerCase();
+        filterAndRenderFiles();
+    });
 }
 
 // Helpers
