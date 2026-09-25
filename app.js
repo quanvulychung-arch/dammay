@@ -1,5 +1,5 @@
 /**
- * CloudVault Pro - Dual-Mode Engine (Guest Upload & Admin Management)
+ * CloudVault Pro - Dual-Mode Frontend Engine
  * Master Admin Password: huannet123
  */
 
@@ -209,7 +209,6 @@ async function handleAdminLogin(e) {
 
     if (!password) return;
 
-    // Direct Instant Verification for Master Password
     if (password === MASTER_ADMIN_PASS) {
         localStorage.setItem('cloudvault_admin_auth', 'true');
         sessionStorage.setItem('cloudvault_admin_auth', 'true');
@@ -219,25 +218,6 @@ async function handleAdminLogin(e) {
         loadAdminCloudFiles();
         return;
     }
-
-    // Try Worker Verification as well
-    try {
-        const res = await fetch(`${WORKER_URL}/admin/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-            localStorage.setItem('cloudvault_admin_auth', 'true');
-            sessionStorage.setItem('cloudvault_admin_auth', 'true');
-            closeAdminLoginModal();
-            renderAuthStatus();
-            showToast('👑 Đăng nhập Quản Trị Viên thành công!', 'success');
-            loadAdminCloudFiles();
-            return;
-        }
-    } catch (e) {}
 
     showToast('Mật khẩu quản trị không chính xác!', 'error');
 }
@@ -249,7 +229,7 @@ function handleAdminLogout() {
     showToast('Đã đăng xuất khỏi quyền Quản trị', 'info');
 }
 
-// 1. Upload Files (Public)
+// 1. Upload Files
 async function handleUploadFiles(files) {
     const queue = document.getElementById('upload-queue');
     const queueItems = document.getElementById('queue-items');
@@ -286,14 +266,24 @@ async function handleUploadFiles(files) {
             const formData = new FormData();
             formData.append('file', file);
 
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
             const uploadRes = await fetch(`${WORKER_URL}/upload`, {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
-            const resData = await uploadRes.json();
+            let resData = null;
+            try {
+                resData = await uploadRes.json();
+            } catch (e) {
+                throw new Error(`Máy chủ phản hồi mã ${uploadRes.status}`);
+            }
 
-            if (uploadRes.ok && resData.success) {
+            if (uploadRes.ok && resData && resData.success) {
                 itemEl.classList.add('upload-done');
                 itemEl.className = 'bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between text-xs upload-done transition-all';
                 itemEl.innerHTML = `
@@ -322,18 +312,19 @@ async function handleUploadFiles(files) {
                     loadAdminCloudFiles();
                 }
             } else {
-                throw new Error(resData.message || 'Lỗi kết nối máy chủ');
+                throw new Error(resData?.message || `Lỗi tải lên (${uploadRes.status})`);
             }
         } catch (err) {
+            const errMsg = err.name === 'AbortError' ? 'Quá thời gian tải lên (Timeout)' : err.message;
             itemEl.className = 'bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex items-center justify-between text-xs transition-all';
             itemEl.innerHTML = `
                 <div class="truncate pr-2">
                     <p class="font-semibold text-rose-800 truncate">${escapeHtml(file.name)}</p>
-                    <p class="text-[10px] text-rose-500 truncate">${escapeHtml(err.message)}</p>
+                    <p class="text-[10px] text-rose-500 truncate">${escapeHtml(errMsg)}</p>
                 </div>
                 <span class="text-rose-600 font-bold text-[11px] shrink-0"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Thất bại</span>
             `;
-            showToast(`Lỗi: ${err.message}`, 'error');
+            showToast(`Lỗi tải lên: ${errMsg}`, 'error');
         }
     }
 }
@@ -407,10 +398,7 @@ async function loadAdminCloudFiles() {
     if (!isAdmin()) return;
 
     try {
-        const res = await fetch(`${WORKER_URL}/files?pass=${MASTER_ADMIN_PASS}`, {
-            headers: { 'Authorization': 'Bearer admin_authenticated' }
-        });
-
+        const res = await fetch(`${WORKER_URL}/files`);
         const data = await res.json();
 
         if (data.success && Array.isArray(data.files)) {
@@ -519,10 +507,7 @@ async function deleteFile(fileId, fileName) {
     try {
         const res = await fetch(`${WORKER_URL}/delete`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer admin_authenticated'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: fileId })
         });
         const data = await res.json();
