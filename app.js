@@ -4,7 +4,7 @@
  */
 
 // Configuration
-let CLIENT_ID = localStorage.getItem('onedrive_client_id') || 'cde527a1-c2b6-4203-80a3-fe29e8cd9faf';
+let CLIENT_ID = localStorage.getItem('onedrive_client_id') || '63568711-b221-4706-b9bf-4e4ad16f9bcf';
 let AUTH_TYPE = localStorage.getItem('onedrive_auth_type') || 'common';
 
 // Current page redirect URI
